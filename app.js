@@ -384,12 +384,10 @@
         $('#raiz').innerHTML = '<div class="auth"><div class="auth-card"><div class="corpo"><h1>Sem unidade</h1><p class="sub">Seu usuário ainda não foi ligado a nenhuma unidade. Fale com um gestor.</p></div></div></div>';
         return;
       }
-      const salvo = store.get('gc_un');
-      S.un = S.unidades.some((u) => u.id === salvo) ? salvo : S.unidades[0].id;
       await carregarCatalogo();
-      await carregarEstoqueIns();
       if (ehGestor()) await contarPendentes();
-      montarApp();
+      // com mais de uma unidade, a pessoa escolhe em qual vai trabalhar
+      if (S.unidades.length > 1) telaEscolherUnidade(); else await entrarNaUnidade(S.unidades[0].id);
     } catch (e) { falha(e); telaAuth(); } finally { iniciando = false; }
   }
   async function contarPendentes() {
@@ -432,7 +430,8 @@
         <div class="principal">
           <header class="topo"><div class="barra">
             <button class="icone-btn menu-btn" id="b-menu" aria-label="Menu">${ic('menu')}</button>
-            <div class="gavetas" role="tablist" aria-label="Unidade">${S.unidades.map((u) => `<button role="tab" data-un="${u.id}">${esc(nomeCurto(u))}</button>`).join('')}</div>
+            <div class="unidade-atual"><span>Unidade</span><b>${esc(unAtual()?.nome)}</b></div>
+            ${S.unidades.length > 1 ? `<button class="btn sec mini" id="b-trocar">${ic('transf')} Trocar unidade</button>` : ''}
             <div class="direita"><span class="badge dourado" title="Contagem semanal">Contagem: ${dataCurta(proximaContagem())}</span></div>
           </div></header>
           <main class="conteudo" id="conteudo"></main>
@@ -444,14 +443,31 @@
       if (e.target.closest('.nav a')) $('#app').classList.remove('menu-aberto');
       else if (e.target === $('#app') ) $('#app').classList.remove('menu-aberto');
     });
-    $$('.gavetas button').forEach((b) => {
-      b.onclick = async () => {
-        S.un = b.dataset.un; store.set('gc_un', S.un);
-        await carregarEstoqueIns().catch(falha);
-        renderRota();
-      };
-    });
+    const bt = $('#b-trocar'); if (bt) bt.onclick = () => telaEscolherUnidade();
     renderRota();
+  }
+
+  // tela de escolha da unidade (logo depois do login, e no botão "Trocar unidade")
+  function telaEscolherUnidade() {
+    S.charts.forEach((c) => c.destroy()); S.charts = [];
+    $('#raiz').innerHTML = `<div class="auth"><div class="auth-card largo"><div class="faixas"><i></i><i></i><i></i></div><div class="corpo">
+      <img class="logo" src="logo.png" alt="Good Cake">
+      <h1>Olá, ${esc((S.perfil?.nome || '').split(' ')[0])}!</h1><p class="sub">Em qual unidade você vai trabalhar agora?</p>
+      <div class="escolha-unidades">${S.unidades.map((u) => `
+        <button class="escolha-unidade" data-un="${u.id}">
+          <b>${esc(u.nome)}</b>
+          <span>${esc(u.cidade || '')}${u.responsavel ? ' · ' + esc(u.responsavel) : ''}</span>
+        </button>`).join('')}</div>
+      <div class="auth-links"><button id="b-sair2">Sair</button></div>
+    </div></div></div>`;
+    $$('.escolha-unidade').forEach((b) => { b.onclick = () => entrarNaUnidade(b.dataset.un); });
+    $('#b-sair2').onclick = () => sb.auth.signOut();
+  }
+  async function entrarNaUnidade(id) {
+    S.un = id;
+    try { await carregarEstoqueIns(); } catch (e) { falha(e); }
+    if (!location.hash || location.hash === '#') location.hash = '#/painel';
+    montarApp();
   }
 
   // fecha o menu ao tocar fora (celular)
@@ -464,7 +480,6 @@
   async function renderRota() {
     const r = rotaAtual();
     $$('.nav a').forEach((a) => a.classList.toggle('ativo', a.dataset.rota === r));
-    $$('.gavetas button').forEach((b) => b.classList.toggle('ativo', b.dataset.un === S.un));
     S.charts.forEach((c) => c.destroy()); S.charts = [];
     const el = $('#conteudo');
     if (!el) return;
