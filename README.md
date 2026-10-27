@@ -29,9 +29,12 @@ A chave anon no `config.js` é pública por natureza. Quem protege os dados são
 
 ## Primeiros acessos
 
-1. **Vinicius** abre o site, clica em **Criar acesso** e se cadastra. O **primeiro cadastro vira Gestor** automaticamente.
-2. **Analanda** faz o mesmo. Ela entra como **pendente**.
-3. O Vinicius abre **Usuários**, muda a Analanda para **Gestor** e clica em **Salvar**.
+Ninguém cria login sozinho: o cadastro público está **desligado** no Supabase. Todo acesso passa pelo gestor.
+
+1. O Vinicius já foi convidado (viniciuscandidosant@gmail.com). Ele abre o e-mail do convite, clica no link, cria a senha e entra como **Gestor**.
+2. Para dar acesso a alguém (a Analanda, por exemplo): no app, **Usuários → Convidar pessoa**. Isso abre o Supabase em **Authentication → Users → Add user → Send invitation**. Coloque o e-mail da pessoa.
+3. A pessoa recebe o convite, cria a senha e aparece em **Usuários** como **pendente**, sem acesso a nada.
+4. O gestor escolhe o papel (Gestor ou Operador), marca as unidades e clica em **Salvar**.
 
 Gestores acessam as duas unidades e fazem tudo. Para alguém que só opera uma unidade (ajudante, por exemplo), use **Operador** e marque a unidade. O operador:
 
@@ -39,7 +42,7 @@ Gestores acessam as duas unidades e fazem tudo. Para alguém que só opera uma u
 - não altera fichas técnicas, preços nem cadastros;
 - não estorna entradas.
 
-## 4. Rotina
+## Rotina
 
 | Quando | O quê |
 |---|---|
