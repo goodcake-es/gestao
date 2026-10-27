@@ -40,6 +40,7 @@
   const metaCmv = () => n(S.cat.config.meta_cmv) || 0.35;
   const ehGestor = () => S.perfil?.papel === 'gestor';
   const unAtual = () => S.unidades.find((u) => u.id === S.un);
+  const iniciais = (nome) => String(nome || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
   const nomeCurto = (u) => (u?.nome || '').replace(/^GoodCake\s*-\s*/i, '');
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -403,6 +404,7 @@
     { id: 'contagem', t: 'Contagem semanal', ic: 'contagem', g: 'Operação' },
     { id: 'estoque', t: 'Estoque', ic: 'estoque', g: 'Estoque' },
     { id: 'entradas', t: 'Entradas', ic: 'entrada', g: 'Estoque' },
+    { id: 'perdas', t: 'Perdas', ic: 'perda', g: 'Estoque' },
     { id: 'transferencias', t: 'Transferências', ic: 'transf', g: 'Estoque' },
     { id: 'fichas', t: 'Fichas técnicas', ic: 'ficha', g: 'Gestão' },
     { id: 'cadastros', t: 'Cadastros', ic: 'cadastro', g: 'Gestão' },
@@ -423,15 +425,16 @@
           <div class="faixas"><i></i><i></i><i></i></div>
           <div class="marca"><div class="marca-logo"><img src="logo.png" alt="Good Cake"></div><span>Sistema de gestão</span></div>
           <nav class="nav">${nav}</nav>
-          <div class="usuario"><b>${esc(S.perfil.nome)}</b><span class="muted">${ehGestor() ? 'Gestor' : 'Operador'} · ${esc(S.perfil.email || '')}</span>
-            <div style="margin-top:8px"><button class="btn sec mini" id="b-sair">${ic('sair')} Sair</button></div></div>
+          <div class="usuario"><span class="avatar">${esc(iniciais(S.perfil.nome))}</span>
+            <div class="quem"><b>${esc(S.perfil.nome)}</b><span>${ehGestor() ? 'Gestor' : 'Operador'} · ${esc(S.perfil.email || '')}</span></div>
+            <button class="icone-btn" id="b-sair" title="Sair" aria-label="Sair">${ic('sair')}</button></div>
         </aside>
         <div class="principal">
           <header class="topo"><div class="barra">
             <button class="icone-btn menu-btn" id="b-menu" aria-label="Menu">${ic('menu')}</button>
-            <div class="unidade-atual"><span>Unidade</span><b>${esc(unAtual()?.nome)}</b></div>
-            ${S.unidades.length > 1 ? `<button class="btn sec mini" id="b-trocar">${ic('transf')} Trocar unidade</button>` : ''}
-            <div class="direita"><span class="badge dourado" title="Contagem semanal">Contagem: ${dataCurta(proximaContagem())}</span></div>
+            <div class="unidade-atual" title="${esc(unAtual()?.nome)}"><b><i class="pref">${esc((unAtual()?.nome || '').slice(0, (unAtual()?.nome || '').length - nomeCurto(unAtual()).length))}</i>${esc(nomeCurto(unAtual()))}</b></div>
+            ${S.unidades.length > 1 ? `<button class="btn sec mini" id="b-trocar" title="Trocar unidade">${ic('transf')}<span>Trocar unidade</span></button>` : ''}
+            <div class="direita"><span class="badge dourado" title="Contagem semanal">Próxima contagem · ${diaSemana(proximaContagem()).split('-')[0]} ${dataCurta(proximaContagem())}</span></div>
           </div></header>
           <main class="conteudo" id="conteudo"></main>
         </div>
@@ -530,7 +533,7 @@
       <div class="grade k4 mt">
         <div class="kpi dourado"><div class="rotulo">Rendimento</div><div class="valor">${p.rendimento_medio == null ? '—' : fmt(n(p.rendimento_medio) * potesPorReceita(), 1)}</div><div class="det">potes por receita (padrão ${potesPorReceita()}) · ${fmt(p.producoes)} produções</div></div>
         <div class="kpi"><div class="rotulo">Lucro bruto</div><div class="valor">${brl(fat - n(p.custo_vendido))}</div><div class="det">faturamento − custo das fichas</div></div>
-        <div class="kpi cacau"><div class="rotulo">Perdas</div><div class="valor">${brl(p.perdas)}</div><div class="det">vencidos, quebras etc.</div></div>
+        <div class="kpi cacau"><div class="rotulo">Perdas</div><div class="valor">${brl(p.perdas)}</div><div class="det"><a href="#/perdas">ver perdas</a></div></div>
         <div class="kpi"><div class="rotulo">Reservas abertas</div><div class="valor">${fmt(p.reservas_abertas)}</div><div class="det"><a href="#/reservas">ver reservas</a></div></div>
       </div>
       <div class="grade k2 mt">
@@ -541,7 +544,7 @@
         <div class="card"><h2>Próximas reservas</h2>${reservas.length ? `<ul class="lista-simples">${reservas.slice(0, 6).map((r) => `
           <li><div class="grow"><b>${esc(r.cliente)}</b><div class="small muted">${dataBR(r.data_entrega)}${r.hora ? ' · ' + esc(r.hora) : ''}</div></div>${badgeStatus(r.status)}</li>`).join('')}</ul>` : '<div class="vazio">Nenhuma reserva aberta.</div>'}</div>
         <div class="card"><h2>Estoque baixo</h2>${baixos.length ? `<ul class="lista-simples">${baixos.slice(0, 8).map((i) => `
-          <li><div class="grow">${esc(i.nome)}<div class="small muted">mínimo ${qtdFmt(i.estoque_minimo, i.unidade)}</div></div><span class="badge vermelho">${qtdFmt(S.estoqueIns[i.id]?.quantidade || 0, i.unidade)}</span></li>`).join('')}</ul>` : '<div class="vazio">Tudo acima do mínimo. 👌</div>'}</div>
+          <li><div class="grow">${esc(i.nome)}<div class="small muted">mínimo ${qtdFmt(i.estoque_minimo, i.unidade)}</div></div><span class="badge vermelho">${qtdFmt(S.estoqueIns[i.id]?.quantidade || 0, i.unidade)}</span></li>`).join('')}</ul>` : '<div class="vazio">Tudo acima do mínimo.</div>'}</div>
         <div class="card"><h2>Vendas por canal</h2>${(p.por_canal || []).length ? `<ul class="lista-simples">${p.por_canal.map((c) => `
           <li><div class="grow">${esc(c.canal)}<div class="barra-prog"><i style="width:${fat ? (n(c.total) / fat * 100).toFixed(1) : 0}%"></i></div></div><b class="num">${brl(c.total)}</b></li>`).join('')}</ul>` : '<div class="vazio">Sem vendas no período.</div>'}</div>
       </div>`;
@@ -873,7 +876,7 @@
         ${tabela(['Data', 'Tipo', 'Item', '#Quantidade', '#Valor', 'Obs.'], linhas, { vazio: 'Sem movimentos.' })}</div>`;
     }
     el.innerHTML = cabecalho('Estoque', `${esc(nomeCurto(unAtual()))} · saldo atualizado a cada movimento`,
-      `<button class="btn sec" id="b-perda">${ic('perda')} Registrar perda</button><a class="btn" href="#/entradas">${ic('entrada')} Entrada</a>`) + `
+      `<button class="btn sec" id="b-perda">${ic('perda')} Dar saída de perdas</button><a class="btn" href="#/entradas">${ic('entrada')} Nova entrada</a>`) + `
       <div class="abas">${[['potes', 'Potes prontos'], ['insumos', 'Ingredientes e embalagens'], ['extrato', 'Extrato']].map(([k, t]) => `<button data-aba="${k}" class="${S.abaEst === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
       ${corpo}`;
     $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaEst = b.dataset.aba; recarregar(); }; });
@@ -886,36 +889,111 @@
     const ft = $('#f-tipo', el); if (ft) ft.onchange = () => { S.tipoMov = ft.value; recarregar(); };
   }
 
-  function formPerda() {
+  // ================================================================== PERDAS (saída de estoque sem venda)
+  const MOTIVOS_PERDA = ['Vencido', 'Quebrado / derramado', 'Sem refrigeração', 'Degustação / cortesia', 'Erro de produção', 'Outro'];
+
+  async function vPerdas(el) {
+    S.pPer = S.pPer || { de: inicioMes(), ate: hoje(), preset: 'mes' };
+    const { de, ate } = S.pPer;
+    const [movs, painel, perfis] = await Promise.all([
+      dados(sb.from('movimentos').select('*').eq('unidade_id', S.un).eq('tipo', 'perda').gte('data', de).lte('data', ate)
+        .order('data', { ascending: false }).order('criado_em', { ascending: false }).limit(500)),
+      rpc('rpc_painel', { p_unidade: S.un, p_de: de, p_ate: ate }),
+      dados(sb.from('perfis').select('id,nome')).catch(() => []),
+    ]);
+    const nomePessoa = (id) => perfis.find((p) => p.id === id)?.nome || '—';
+    const motivoDe = (m) => (m.obs || '').split(' · ')[0] || 'Outro';
+    const total = movs.reduce((s, m) => s - n(m.valor), 0);
+    const fat = n(painel.faturamento);
+    const porMotivo = {};
+    movs.forEach((m) => { const k = motivoDe(m); porMotivo[k] = (porMotivo[k] || 0) - n(m.valor); });
+    const motivos = Object.entries(porMotivo).sort((a, b) => b[1] - a[1]);
+    const potes = movs.filter((m) => m.produto_id).reduce((s, m) => s - n(m.quantidade), 0);
+
+    el.innerHTML = cabecalho('Perdas', `${esc(unAtual()?.nome)} · tudo que saiu do estoque sem ser vendido`,
+      `<div id="periodo"></div><button class="btn" id="b-nova">${ic('perda')} Dar saída de perdas</button>`) + `
+      <div class="grade k4">
+        <div class="kpi"><div class="rotulo">Valor perdido</div><div class="valor">${brl(total)}</div><div class="det">custo dos itens</div></div>
+        <div class="kpi dourado"><div class="rotulo">Sobre o faturamento</div><div class="valor">${fat > 0 ? pct(total / fat) : '—'}</div><div class="det">faturamento ${brl(fat)}</div></div>
+        <div class="kpi cacau"><div class="rotulo">Potes perdidos</div><div class="valor">${fmtAuto(potes)}</div><div class="det">${fmt(movs.length)} registro(s)</div></div>
+        <div class="kpi"><div class="rotulo">Principal motivo</div><div class="valor" style="font-size:19px">${motivos.length ? esc(motivos[0][0]) : '—'}</div><div class="det">${motivos.length ? brl(motivos[0][1]) : 'sem perdas no período'}</div></div>
+      </div>
+      <div class="grade k2 mt" style="grid-template-columns: 2fr 1fr">
+        <div class="card">${tabela(['Data', 'Item', '#Quantidade', 'Motivo', '#Valor', 'Registrado por'],
+          movs.map((m) => {
+            const i = m.insumo_id ? insPorId(m.insumo_id) : null;
+            const det = (m.obs || '').split(' · ').slice(1).join(' · ');
+            return `<tr><td>${dataCurta(m.data)}</td><td><b>${esc(nomeItem(m))}</b><div class="small muted">${i ? esc(i.categoria) : 'Pote pronto'}</div></td>
+              <td class="num">${i ? qtdFmt(-n(m.quantidade), i.unidade) : fmtAuto(-n(m.quantidade)) + ' pote(s)'}</td>
+              <td><span class="badge">${esc(motivoDe(m))}</span>${det ? `<div class="small muted">${esc(det)}</div>` : ''}</td>
+              <td class="num">${brl(-n(m.valor))}</td><td class="small muted">${esc(nomePessoa(m.criado_por))}</td></tr>`;
+          }), { vazio: 'Nenhuma perda no período.', rodape: movs.length ? `<tr><td colspan="4">Total</td><td class="num">${brl(total)}</td><td></td></tr>` : '' })}</div>
+        <div class="card"><h2>Por motivo</h2>${motivos.length ? `<ul class="lista-simples">${motivos.map(([k, v]) => `
+          <li><div class="grow">${esc(k)}<div class="barra-prog"><i style="width:${total ? (v / total * 100).toFixed(1) : 0}%"></i></div></div><b class="num">${brl(v)}</b></li>`).join('')}</ul>`
+          : '<div class="vazio">Sem perdas no período.</div>'}
+          <p class="small muted" style="margin:14px 0 0">A perda tira o item do estoque pelo custo atual. Ela entra no CMV real da contagem de sábado.</p></div>
+      </div>`;
+    seletorPeriodo($('#periodo', el), (np) => { S.pPer = np; recarregar(); }, S.pPer);
+    $('#b-nova', el).onclick = () => formPerda();
+  }
+
+  async function formPerda() {
+    let estP = {};
+    try { estP = await estoqueProdutos(); } catch (e) { falha(e); }
     const d = abrirModal({
-      titulo: 'Registrar perda', classe: 'estreito',
+      titulo: 'Dar saída de perdas', classe: 'largo',
       corpo: `
-        <div class="campo"><label>O que foi perdido?</label><select id="l-tipo"><option value="produto">Pote pronto</option><option value="insumo">Ingrediente / embalagem</option></select></div>
-        <div class="campo"><label>Item</label><select id="l-item"></select></div>
         <div class="linha-campos">
-          <div class="campo"><label>Quantidade <span id="l-un" class="muted"></span></label><input type="number" id="l-q" min="0" step="any" value="1"></div>
           <div class="campo"><label>Data</label><input type="date" id="l-data" value="${hoje()}"></div>
+          <div class="campo" style="grid-column: span 2"><label>Observação geral</label><input type="text" id="l-obs" placeholder="Opcional. Ex.: geladeira desligou à noite"></div>
         </div>
-        <div class="campo"><label>Motivo</label><select id="l-mot">${['Vencido', 'Quebrado / derramado', 'Sem refrigeração', 'Degustação / cortesia', 'Erro de produção', 'Outro'].map((m) => `<option>${m}</option>`).join('')}</select></div>
-        <div class="campo"><label>Detalhe</label><input type="text" id="l-obs" placeholder="Opcional"></div>`,
-      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="l-salvar">Registrar perda</button>`,
+        <div class="campo"><label>Itens perdidos</label><div class="itens-lista" id="l-itens"></div>
+          <div><button type="button" class="btn sec mini mt" id="l-add">${ic('mais')} Adicionar item</button></div></div>
+        <div class="total-box"><span class="muted" id="l-resumo"></span><b id="l-total">${brl(0)}</b></div>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="l-salvar">Dar saída</button>`,
     });
-    const preencher = () => {
-      const t = d.$('#l-tipo').value;
-      d.$('#l-item').innerHTML = t === 'produto' ? opcoes(produtosAtivos(), null) : selInsumoOpcoes();
-      unid();
+    const custoLinha = (l) => {
+      const t = l.querySelector('[data-t]').value, id = l.querySelector('[data-i]').value, q = n(l.querySelector('[data-q]').value);
+      if (!id) return 0;
+      return q * (t === 'produto' ? custoProduto(id) : custoInsumo(id));
     };
-    const unid = () => {
-      const t = d.$('#l-tipo').value;
-      d.$('#l-un').textContent = t === 'produto' ? '(potes)' : `(${insPorId(d.$('#l-item').value)?.unidade || ''})`;
+    const total = () => {
+      const ls = d.$$('.item-linha');
+      d.$('#l-total').textContent = brl(ls.reduce((s, l) => s + custoLinha(l), 0));
+      d.$('#l-resumo').textContent = `${ls.length} item(ns) · valor a custo`;
     };
-    d.$('#l-tipo').onchange = preencher; d.$('#l-item').onchange = unid; preencher();
+    const addLinha = () => {
+      const l = document.createElement('div'); l.className = 'item-linha f5';
+      l.innerHTML = `<div class="campo"><label>Tipo</label><select data-t><option value="produto">Pote pronto</option><option value="insumo">Ingrediente / embalagem</option></select></div>
+        <div class="campo"><label>Item</label><select data-i></select></div>
+        <div class="campo"><label>Quantidade <span data-u class="muted"></span></label><input type="number" data-q min="0" step="any" value="1"></div>
+        <div class="campo"><label>Motivo</label><select data-m>${MOTIVOS_PERDA.map((m) => `<option>${m}</option>`).join('')}</select></div>
+        <div><button type="button" class="icone-btn" data-rm title="Remover">${ic('lixo')}</button></div>`;
+      d.$('#l-itens').appendChild(l);
+      const t = l.querySelector('[data-t]'), i = l.querySelector('[data-i]');
+      const un = () => {
+        const x = t.value === 'produto' ? null : insPorId(i.value);
+        l.querySelector('[data-u]').textContent = t.value === 'produto' ? `(potes · tem ${fmtAuto(estP[i.value] || 0)})`
+          : x ? `(${x.unidade} · tem ${qtdFmt(S.estoqueIns[x.id]?.quantidade || 0, x.unidade)})` : '';
+        total();
+      };
+      const fill = () => { i.innerHTML = t.value === 'produto' ? opcoes(produtosAtivos(), null) : selInsumoOpcoes(); un(); };
+      t.onchange = fill; i.onchange = un; l.querySelector('[data-q]').oninput = total;
+      l.querySelector('[data-rm]').onclick = () => { l.remove(); total(); };
+      fill();
+    };
+    d.$('#l-add').onclick = addLinha; addLinha();
     d.$('#l-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
-      const t = d.$('#l-tipo').value, id = d.$('#l-item').value;
-      if (!id) throw new Error('Escolha o item.');
-      await rpc('rpc_registrar_perda', { p: { unidade_id: S.un, data: d.$('#l-data').value, quantidade: n(d.$('#l-q').value),
-        [t === 'produto' ? 'produto_id' : 'insumo_id']: id, obs: [d.$('#l-mot').value, d.$('#l-obs').value.trim()].filter(Boolean).join(' · ') } });
-      d.fechar(); toast('Perda registrada.', 'ok'); recarregar();
+      const itens = d.$$('.item-linha').map((l) => ({ t: l.querySelector('[data-t]').value, id: l.querySelector('[data-i]').value,
+        q: n(l.querySelector('[data-q]').value), m: l.querySelector('[data-m]').value })).filter((x) => x.id && x.q > 0);
+      if (!itens.length) throw new Error('Adicione ao menos um item com quantidade.');
+      const obs = d.$('#l-obs').value.trim();
+      for (const x of itens) {
+        await rpc('rpc_registrar_perda', { p: { unidade_id: S.un, data: d.$('#l-data').value, quantidade: x.q,
+          [x.t === 'produto' ? 'produto_id' : 'insumo_id']: x.id, obs: [x.m, obs].filter(Boolean).join(' · ') } });
+      }
+      await carregarEstoqueIns();
+      d.fechar(); toast(itens.length > 1 ? `${itens.length} perdas registradas.` : 'Perda registrada.', 'ok'); recarregar();
     });
   }
 
@@ -1211,7 +1289,7 @@
             const dif = n(i.quantidade_contada) - n(i.quantidade_sistema);
             return `<tr><td>${esc(nomeItem(i))}</td><td class="num">${f(i.quantidade_sistema)}</td><td class="num">${f(i.quantidade_contada)}</td>
               <td class="num"><span class="badge ${dif < 0 ? 'vermelho' : 'dourado'}">${dif > 0 ? '+' : ''}${f(dif)}</span></td><td class="num">${brl(dif * n(i.custo_unitario))}</td></tr>`;
-          }), { vazio: 'Nenhuma diferença: estoque batido. 👏' })}`,
+          }), { vazio: 'Nenhuma diferença: o estoque bateu com o sistema.' })}`,
         rodape: '<button class="btn sec" data-fechar>Fechar</button>',
       });
     } catch (e) { falha(e); }
@@ -1576,7 +1654,7 @@
   }
 
   const VIEWS = { painel: vPainel, vendas: vVendas, reservas: vReservas, producao: vProducao, contagem: vContagem, estoque: vEstoque,
-    entradas: vEntradas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios };
+    entradas: vEntradas, perdas: vPerdas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios };
 
   // ------------------------------------------------------------------ início
   window.addEventListener('hashchange', () => { if ($('#conteudo')) renderRota(); });
