@@ -8,6 +8,8 @@
   // ------------------------------------------------------------------ conexão
   const CFG = window.GOODCAKE_CONFIG || {};
   const configurado = window.__SB_MOCK__ || (CFG.SUPABASE_URL && !/SEU-PROJETO/.test(CFG.SUPABASE_URL));
+  // link de convite/recuperação: a pessoa chega logada e precisa definir a senha
+  let precisaSenha = /type=(invite|recovery)/.test(location.hash);
   const sb = window.__SB_MOCK__ || (configurado ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null);
 
   // ------------------------------------------------------------------ estado
@@ -314,7 +316,7 @@
 
   function telaAuth(modo = 'entrar', aviso = '') {
     const titulos = { entrar: ['Entrar', 'Gestão das unidades Good Cake'], criar: ['Criar acesso', 'Depois do cadastro, um gestor libera seu acesso'],
-      esqueci: ['Recuperar senha', 'Enviaremos um link para o seu e-mail'], nova: ['Nova senha', 'Escolha uma senha nova'] };
+      esqueci: ['Recuperar senha', 'Enviaremos um link para o seu e-mail'], nova: ['Crie sua senha', 'Defina a senha que você vai usar para entrar'] };
     const [t, sub] = titulos[modo];
     $('#raiz').innerHTML = `<div class="auth"><div class="auth-card"><div class="faixas"><i></i><i></i><i></i></div><div class="corpo">
       <img class="logo" src="logo.png" alt="Good Cake">
@@ -327,7 +329,7 @@
         <button class="btn bloco" type="submit">${{ entrar: 'Entrar', criar: 'Criar acesso', esqueci: 'Enviar link', nova: 'Salvar senha' }[modo]}</button>
       </form>
       <div class="auth-links">
-        ${modo === 'entrar' ? '<button data-m="criar">Criar acesso</button><button data-m="esqueci">Esqueci a senha</button>' : '<button data-m="entrar">← Voltar para o login</button>'}
+        ${modo === 'entrar' ? '<span class="muted small">Acesso só por convite do gestor</span><button data-m="esqueci">Esqueci a senha</button>' : '<button data-m="entrar">← Voltar para o login</button>'}
       </div></div></div></div>`;
     $$('.auth-links [data-m]').forEach((b) => { b.onclick = () => telaAuth(b.dataset.m); });
     $('#f-auth').onsubmit = async (e) => {
@@ -349,7 +351,7 @@
         } else if (modo === 'nova') {
           const { error } = await sb.auth.updateUser({ password: senha });
           if (error) throw error;
-          toast('Senha alterada.', 'ok'); iniciarSessao();
+          precisaSenha = false; history.replaceState(null, '', location.pathname); toast('Senha salva.', 'ok'); iniciarSessao();
         }
       });
     };
@@ -373,6 +375,7 @@
     try {
       const { data: { session } } = await sb.auth.getSession();
       if (!session) { S.user = null; telaAuth(); return; }
+      if (precisaSenha) { telaAuth('nova'); return; }
       S.user = session.user;
       S.perfil = await dados(sb.from('perfis').select('*').eq('id', S.user.id).maybeSingle());
       if (!S.perfil || S.perfil.papel === 'pendente' || !S.perfil.ativo) { telaPendente(); return; }
@@ -1534,7 +1537,8 @@
     perfis.sort((a, b) => (a.papel === 'pendente' ? -1 : 0) - (b.papel === 'pendente' ? -1 : 0));
     S.pendentes = perfis.filter((p) => p.papel === 'pendente').length;
     el.innerHTML = cabecalho('Usuários', 'Libere acessos e escolha as unidades de cada operador. Gestores acessam todas as unidades.') + `
-      <div class="aviso small"><span>Para criar um acesso, a pessoa entra no sistema e clica em <b>Criar acesso</b>. Depois ela aparece aqui como <b>pendente</b>.</span></div>
+      <div class="aviso small"><span>Ninguém cria login sozinho. Para dar acesso: <b>Convidar pessoa</b> → no Supabase, <b>Invite user</b> com o e-mail dela. Ela recebe o convite, cria a senha e aparece aqui como <b>pendente</b> até você liberar.</span>
+        <a class="btn mini" href="https://supabase.com/dashboard/project/ubulcxxdcwzjktixlakl/auth/users" target="_blank" rel="noopener">Convidar pessoa</a></div>
       <div class="card mt">${tabela(['Nome', 'Papel', 'Unidades', 'Ativo', ''],
         perfis.map((p) => {
           const meu = p.id === S.user.id;
@@ -1564,7 +1568,7 @@
   window.addEventListener('hashchange', () => { if ($('#conteudo')) renderRota(); });
   if (!sb) { telaConfig(); return; }
   sb.auth.onAuthStateChange((evento) => {
-    if (evento === 'PASSWORD_RECOVERY') { telaAuth('nova'); return; }
+    if (evento === 'PASSWORD_RECOVERY') { precisaSenha = true; telaAuth('nova'); return; }
     if (evento === 'SIGNED_IN' && !$('#conteudo')) iniciarSessao();
     if (evento === 'SIGNED_OUT') { S.user = null; S.perfil = null; telaAuth(); }
   });
