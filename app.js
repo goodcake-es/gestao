@@ -168,12 +168,11 @@
     const prods = produtosAtivos();
     el.innerHTML = `<div class="sabores">${prods.map((p) => `
       <div class="sabor" data-id="${p.id}">
-        <span class="ponto ${esc(p.linha)}"></span>
-        <div class="info"><b title="${esc(p.nome)}">${esc(p.nome)}</b>
-          <span>${precos ? brl(p.preco_venda) + ' · ' : ''}${estoque ? 'estoque ' + fmtAuto(estoque[p.id] || 0) : esc(p.linha)}</span></div>
+        <div class="sabor-nome"><span class="ponto ${esc(p.linha)}"></span><b>${esc(p.nome)}</b></div>
+        <div class="sabor-base"><span class="sabor-meta">${esc(p.linha)}${precos ? ' · ' + brl(p.preco_venda) : ''}${estoque ? ' · tem ' + fmtAuto(estoque[p.id] || 0) : ''}</span>
         <div class="stepper"><button type="button" data-d="-1" aria-label="menos">−</button>
           <input type="number" min="0" step="1" inputmode="numeric" value="${qtds[p.id] || 0}" aria-label="${esc(p.nome)}">
-          <button type="button" data-d="1" aria-label="mais">+</button></div>
+          <button type="button" data-d="1" aria-label="mais">+</button></div></div>
       </div>`).join('') || '<div class="vazio">Cadastre os sabores em Fichas técnicas.</div>'}</div>`;
     const ler = () => {
       const o = {};
@@ -422,7 +421,7 @@
       <div class="app" id="app">
         <aside class="lateral">
           <div class="faixas"><i></i><i></i><i></i></div>
-          <div class="marca"><img src="logo.png" alt=""><div><b>Good Cake</b><span>Gestão · bom em cada camada</span></div></div>
+          <div class="marca"><div class="marca-logo"><img src="logo.png" alt="Good Cake"></div><span>Sistema de gestão</span></div>
           <nav class="nav">${nav}</nav>
           <div class="usuario"><b>${esc(S.perfil.nome)}</b><span class="muted">${ehGestor() ? 'Gestor' : 'Operador'} · ${esc(S.perfil.email || '')}</span>
             <div style="margin-top:8px"><button class="btn sec mini" id="b-sair">${ic('sair')} Sair</button></div></div>
