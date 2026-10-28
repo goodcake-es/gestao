@@ -38,7 +38,9 @@
   const fimMes = (d) => { const x = new Date(d.slice(0, 8) + '01T12:00:00'); x.setMonth(x.getMonth() + 1); x.setDate(0); return x.toLocaleDateString('sv-SE'); };
   const potesPorReceita = () => n(S.cat.config.potes_por_receita) || 8;
   const metaCmv = () => n(S.cat.config.meta_cmv) || 0.35;
-  const ehGestor = () => S.perfil?.papel === 'gestor';
+  const ehAdmin = () => S.perfil?.papel === 'admin';
+  const ehGestor = () => ['admin', 'gestor'].includes(S.perfil?.papel);
+  const NOMES_PAPEL = { admin: 'Administrador', gestor: 'Gestor', operador: 'Operador', pendente: 'Pendente' };
   const unAtual = () => S.unidades.find((u) => u.id === S.un);
   const iniciais = (nome) => String(nome || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
   const nomeCurto = (u) => (u?.nome || '').replace(/^GoodCake\s*-\s*/i, '');
@@ -385,7 +387,7 @@
         return;
       }
       await carregarCatalogo();
-      if (ehGestor()) await contarPendentes();
+      if (ehAdmin()) await contarPendentes();
       // com mais de uma unidade, a pessoa escolhe em qual vai trabalhar
       if (S.unidades.length > 1) telaEscolherUnidade(); else await entrarNaUnidade(S.unidades[0].id);
     } catch (e) { falha(e); telaAuth(); } finally { iniciando = false; }
@@ -408,13 +410,13 @@
     { id: 'transferencias', t: 'Transferências', ic: 'transf', g: 'Estoque' },
     { id: 'fichas', t: 'Fichas técnicas', ic: 'ficha', g: 'Gestão' },
     { id: 'cadastros', t: 'Cadastros', ic: 'cadastro', g: 'Gestão' },
-    { id: 'usuarios', t: 'Usuários', ic: 'usuarios', g: 'Gestão', gestor: true },
+    { id: 'usuarios', t: 'Usuários', ic: 'usuarios', g: 'Gestão', admin: true },
   ];
   const rotaAtual = () => { const r = (location.hash.replace(/^#\/?/, '') || 'painel').split('?')[0]; return ROTAS.some((x) => x.id === r) ? r : 'painel'; };
 
   function montarApp() {
     let grupo = '';
-    const nav = ROTAS.filter((r) => !r.gestor || ehGestor()).map((r) => {
+    const nav = ROTAS.filter((r) => !r.admin || ehAdmin()).map((r) => {
       const g = r.g !== grupo ? `<div class="grupo">${r.g}</div>` : ''; grupo = r.g;
       const badge = r.id === 'usuarios' && S.pendentes ? `<span class="badge rosa">${S.pendentes}</span>` : '';
       return `${g}<a href="#/${r.id}" data-rota="${r.id}">${ic(r.ic)}<span>${r.t}</span>${badge}</a>`;
@@ -426,7 +428,7 @@
           <div class="marca"><div class="marca-logo"><img src="logo.png" alt="Good Cake"></div><span>Sistema de gestão</span></div>
           <nav class="nav">${nav}</nav>
           <div class="usuario"><span class="avatar">${esc(iniciais(S.perfil.nome))}</span>
-            <div class="quem"><b>${esc(S.perfil.nome)}</b><span>${ehGestor() ? 'Gestor' : 'Operador'} · ${esc(S.perfil.email || '')}</span></div>
+            <div class="quem"><b>${esc(S.perfil.nome)}</b><span>${NOMES_PAPEL[S.perfil.papel] || ''} · ${esc(S.perfil.email || '')}</span></div>
             <button class="icone-btn" id="b-sair" title="Sair" aria-label="Sair">${ic('sair')}</button></div>
         </aside>
         <div class="principal">
@@ -1110,10 +1112,11 @@
     const trs = todas.filter((t) => t.origem_id === S.un || t.destino_id === S.un);
     const itens = trs.length ? await dados(sb.from('transferencia_itens').select('*').in('transferencia_id', trs.map((t) => t.id))) : [];
     const porT = {}; itens.forEach((i) => { (porT[i.transferencia_id] = porT[i.transferencia_id] || []).push(i); });
-    const nomeUn = (id) => nomeCurto(S.unidades.find((u) => u.id === id)) || 'outra unidade';
+    const todasUn = await rpc('unidades_destino', {}).catch(() => S.unidades);
+    const nomeUn = (id) => nomeCurto(todasUn.find((u) => u.id === id)) || 'outra unidade';
     const desc = (i) => { const x = i.insumo_id ? insPorId(i.insumo_id) : null; return `${x ? qtdFmt(i.quantidade, x.unidade) : fmtAuto(i.quantidade) + '×'} ${esc(nomeItem(i))}`; };
     el.innerHTML = cabecalho('Transferências', 'Mova potes e insumos entre as unidades. O custo vai junto.',
-      S.unidades.length > 1 ? `<button class="btn" id="b-nova">${ic('transf')} Nova transferência</button>` : '') + `
+      todasUn.length > 1 ? `<button class="btn" id="b-nova">${ic('transf')} Nova transferência</button>` : '') + `
       <div class="card">${tabela(['Data', 'Direção', 'Itens', 'Obs.'],
         trs.map((t) => `<tr><td>${dataBR(t.data)}</td>
           <td>${t.origem_id === S.un ? `<span class="badge dourado">enviada</span> para ${esc(nomeUn(t.destino_id))}` : `<span class="badge verde">recebida</span> de ${esc(nomeUn(t.origem_id))}`}</td>
@@ -1125,7 +1128,7 @@
   async function formTransferencia() {
     let estP = {};
     try { estP = await estoqueProdutos(); } catch (e) { falha(e); }
-    const outras = S.unidades.filter((u) => u.id !== S.un);
+    const outras = (await rpc('unidades_destino', {}).catch(() => S.unidades)).filter((u) => u.id !== S.un);
     const d = abrirModal({
       titulo: 'Nova transferência', classe: 'largo',
       corpo: `
@@ -1528,9 +1531,9 @@
           <div class="campo"><label>Dia da contagem</label><select id="cfg-dia" ${ed ? '' : 'disabled'}>${['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'].map((x, i) => `<option value="${i}" ${i === n(S.cat.config.dia_contagem ?? 6) ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
           ${ed ? '<button class="btn" id="cfg-salvar">Salvar parâmetros</button>' : ''}</div>
         <div class="card"><h2>Unidades</h2>${S.unidades.map((u) => `
-          <div class="campo"><label>${esc(u.slug)}</label><input type="text" data-unome="${u.id}" value="${esc(u.nome)}" ${ed ? '' : 'disabled'}>
-            <span class="ajuda">Responsável: <input type="text" data-uresp="${u.id}" value="${esc(u.responsavel || '')}" ${ed ? '' : 'disabled'} style="width:auto;padding:4px 8px"></span></div>`).join('')}
-          ${ed ? '<button class="btn" id="un-salvar">Salvar unidades</button>' : ''}</div></div>`;
+          <div class="campo"><label>${esc(u.slug)}</label><input type="text" data-unome="${u.id}" value="${esc(u.nome)}" ${ehAdmin() ? '' : 'disabled'}>
+            <span class="ajuda">Responsável: <input type="text" data-uresp="${u.id}" value="${esc(u.responsavel || '')}" ${ehAdmin() ? '' : 'disabled'} style="width:auto;padding:4px 8px"></span></div>`).join('')}
+          ${ehAdmin() ? '<button class="btn" id="un-salvar">Salvar unidades</button>' : '<p class="small muted" style="margin:0">Só o administrador altera as unidades.</p>'}</div></div>`;
     }
     el.innerHTML = cabecalho('Cadastros', ed ? 'Insumos, fornecedores e parâmetros do sistema' : 'Somente leitura (fornecedores você pode cadastrar)', botao) + `
       <div class="abas">${[['insumos', 'Insumos'], ['fornecedores', 'Fornecedores'], ['parametros', 'Parâmetros e unidades']].map(([k, t]) => `<button data-aba="${k}" class="${S.abaCad === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
@@ -1624,27 +1627,36 @@
 
   // ================================================================== USUÁRIOS
   async function vUsuarios(el) {
-    if (!ehGestor()) { el.innerHTML = '<div class="card vazio">Apenas gestores.</div>'; return; }
+    if (!ehAdmin()) { el.innerHTML = '<div class="card vazio">Apenas o administrador gerencia usuários.</div>'; return; }
     const [perfis, membros] = await Promise.all([dados(sb.from('perfis').select('*').order('created_at')), dados(sb.from('membros_unidade').select('*'))]);
     perfis.sort((a, b) => (a.papel === 'pendente' ? -1 : 0) - (b.papel === 'pendente' ? -1 : 0));
     S.pendentes = perfis.filter((p) => p.papel === 'pendente').length;
-    el.innerHTML = cabecalho('Usuários', 'Libere acessos e escolha as unidades de cada operador. Gestores acessam todas as unidades.') + `
+    el.innerHTML = cabecalho('Usuários', 'Só o administrador libera acessos, define papéis e escolhe as unidades de cada pessoa.') + `
       <div class="aviso small"><span>Ninguém cria login sozinho. Para dar acesso: <b>Convidar pessoa</b> → no Supabase, <b>Invite user</b> com o e-mail dela. Ela recebe o convite, cria a senha e aparece aqui como <b>pendente</b> até você liberar.</span>
         <a class="btn mini" href="https://supabase.com/dashboard/project/ubulcxxdcwzjktixlakl/auth/users" target="_blank" rel="noopener">Convidar pessoa</a></div>
       <div class="card mt">${tabela(['Nome', 'Papel', 'Unidades', 'Ativo', ''],
         perfis.map((p) => {
-          const meu = p.id === S.user.id;
-          return `<tr data-u="${p.id}"><td><b>${esc(p.nome)}</b>${meu ? ' <span class="badge cacau">você</span>' : ''}<div class="small muted">${esc(p.email || '')}</div></td>
-            <td><select data-papel ${meu ? 'disabled' : ''}>${opcoes([{ id: 'pendente', nome: 'Pendente' }, { id: 'operador', nome: 'Operador' }, { id: 'gestor', nome: 'Gestor' }], p.papel)}</select></td>
-            <td>${S.unidades.map((u) => `<label class="check small"><input type="checkbox" data-un="${u.id}" ${membros.some((m) => m.user_id === p.id && m.unidade_id === u.id) ? 'checked' : ''}> ${esc(nomeCurto(u))}</label>`).join('')}</td>
-            <td><input type="checkbox" data-ativo ${p.ativo ? 'checked' : ''} ${meu ? 'disabled' : ''} style="width:18px;height:18px;accent-color:var(--rosa)"></td>
+          const meu = p.id === S.user.id, adm = p.papel === 'admin';
+          return `<tr data-u="${p.id}"><td><div style="display:flex;align-items:center;gap:8px"><input type="text" data-nome value="${esc(p.nome)}" aria-label="Nome" style="max-width:220px">${meu ? '<span class="badge cacau">você</span>' : ''}</div><div class="small muted" style="margin-top:4px">${esc(p.email || '')}</div></td>
+            <td>${adm ? '<span class="badge cacau">Administrador</span>' : `<select data-papel>${opcoes([{ id: 'pendente', nome: 'Pendente' }, { id: 'operador', nome: 'Operador' }, { id: 'gestor', nome: 'Gestor' }], p.papel)}</select>`}</td>
+            <td>${adm ? '<span class="small muted">Todas as unidades</span>' : S.unidades.map((u) => `<label class="check small"><input type="checkbox" data-un="${u.id}" ${membros.some((m) => m.user_id === p.id && m.unidade_id === u.id) ? 'checked' : ''}> ${esc(nomeCurto(u))}</label>`).join('')}</td>
+            <td>${adm ? '' : `<input type="checkbox" data-ativo ${p.ativo ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--cacau)">`}</td>
             <td><button class="btn mini" data-salvar>Salvar</button></td></tr>`;
         }))}</div>`;
     $$('[data-salvar]', el).forEach((b) => {
       b.onclick = () => ocupado(b, async () => {
         const tr = b.closest('tr'); const id = tr.dataset.u;
-        if (id !== S.user.id) await dados(sb.from('perfis').update({ papel: $('[data-papel]', tr).value, ativo: $('[data-ativo]', tr).checked }).eq('id', id));
+        const nome = $('[data-nome]', tr).value.trim();
+        if (!nome) throw new Error('Informe o nome.');
+        if (!$('[data-papel]', tr)) {
+          await dados(sb.from('perfis').update({ nome }).eq('id', id));
+          if (id === S.user.id) S.perfil.nome = nome;
+          toast('Nome atualizado.', 'ok'); montarApp(); return;
+        }
         const marc = $$('[data-un]', tr).filter((c) => c.checked).map((c) => c.dataset.un);
+        const papel = $('[data-papel]', tr).value;
+        if (['gestor', 'operador'].includes(papel) && !marc.length) throw new Error('Marque ao menos uma unidade para essa pessoa.');
+        await dados(sb.from('perfis').update({ nome, papel, ativo: $('[data-ativo]', tr).checked }).eq('id', id));
         await dados(sb.from('membros_unidade').delete().eq('user_id', id));
         if (marc.length) await dados(sb.from('membros_unidade').insert(marc.map((unidade_id) => ({ user_id: id, unidade_id }))));
         toast('Usuário atualizado.', 'ok');
