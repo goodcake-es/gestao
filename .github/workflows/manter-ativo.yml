@@ -1,0 +1,17 @@
+# Faz uma consulta leve no Supabase a cada 3 dias para o projeto gratuito não ser pausado por inatividade.
+name: Manter Supabase ativo
+on:
+  schedule:
+    - cron: '17 11 */3 * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consulta leve no banco
+        env:
+          URL: https://ubulcxxdcwzjktixlakl.supabase.co
+          KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVidWxjeHhkY3d6amt0aXhsYWtsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxMTU5NzksImV4cCI6MjEwODY5MTk3OX0.QdtyBm8IAdiH3vqRx1R5LUxgHQHjguVwH4o16kBJmVw
+        run: |
+          curl -fsS "$URL/rest/v1/config?select=chave&limit=1" -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+          curl -fsS "$URL/auth/v1/health" -H "apikey: $KEY"
