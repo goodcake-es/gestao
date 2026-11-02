@@ -1012,7 +1012,7 @@
       <div class="card">${tabela(['Data', 'Fornecedor', 'Documento', '#Valor', 'Status', ''],
         ents.map((e) => `<tr class="clicavel ${e.status === 'estornada' ? 'riscado' : ''}" data-ver="${e.id}">
           <td>${dataBR(e.data)}</td><td>${esc(fornPorId(e.fornecedor_id)?.nome || '—')}</td><td>${esc(e.documento || '—')}</td>
-          <td class="num">${brl(e.valor_total)}</td><td>${badgeStatus(e.status)}</td><td class="small muted">ver itens →</td></tr>`),
+          <td class="num">${brl(e.valor_total)}${n(e.desconto) > 0 ? `<div class="small pos">desc. ${brl(e.desconto)}</div>` : ''}</td><td>${badgeStatus(e.status)}</td><td class="small muted">ver itens →</td></tr>`),
         { vazio: 'Nenhuma entrada no período.', rodape: ents.length ? `<tr><td colspan="3">Total de compras</td><td class="num">${brl(tot)}</td><td colspan="2"></td></tr>` : '' })}</div>`;
     seletorPeriodo($('#periodo', el), (np) => { S.pEnt = np; recarregar(); }, S.pEnt);
     $('#b-nova', el).onclick = () => formEntrada();
@@ -1022,14 +1022,18 @@
   async function verEntrada(ent) {
     try {
       const movs = await dados(sb.from('movimentos').select('*').eq('documento_id', ent.id).eq('tipo', 'entrada'));
+      const bruto = n(ent.valor_bruto) || n(ent.valor_total), desc = n(ent.desconto);
       const d = abrirModal({
-        titulo: `Entrada de ${dataBR(ent.data)}`,
+        titulo: `Entrada de ${dataBR(ent.data)}`, classe: 'largo',
         corpo: `<p class="muted" style="margin-top:0">${esc(fornPorId(ent.fornecedor_id)?.nome || 'Sem fornecedor')} · ${esc(ent.documento || 'sem documento')} ${badgeStatus(ent.status)}</p>
-          ${tabela(['Insumo', '#Quantidade', '#Custo', '#Valor', 'Validade'], movs.map((m) => {
+          ${tabela(['Insumo', '#Quantidade', '#Custo', '#Valor pago', 'Validade'], movs.map((m) => {
             const i = insPorId(m.insumo_id);
-            return `<tr><td>${esc(i?.nome)}</td><td class="num">${qtdFmt(m.quantidade, i?.unidade)}</td><td class="num">${custoUnFmt(m.custo_unitario, i?.unidade)}</td>
-              <td class="num">${brl(m.valor)}</td><td>${m.validade ? dataBR(m.validade) : '—'}</td></tr>`;
-          }), { rodape: `<tr><td colspan="3">Total</td><td class="num">${brl(ent.valor_total)}</td><td></td></tr>` })}
+            const det = m.obs && m.obs !== ent.documento ? `<div class="small muted">${esc(m.obs)}</div>` : '';
+            return `<tr><td>${esc(i?.nome)}${det}</td><td class="num">${qtdFmt(m.quantidade, i?.unidade)}</td><td class="num">${custoUnFmt(m.custo_unitario, i?.unidade)}</td>
+              <td class="num">${n(m.valor) === 0 ? '<span class="badge verde">bonificado</span>' : brl(m.valor)}</td><td>${m.validade ? dataBR(m.validade) : '—'}</td></tr>`;
+          }), { rodape: `${desc > 0 ? `<tr><td colspan="3">Valor bruto</td><td class="num">${brl(bruto)}</td><td></td></tr>
+              <tr><td colspan="3">Descontos</td><td class="num neg">− ${brl(desc)}</td><td></td></tr>` : ''}
+            <tr><td colspan="3">Total pago</td><td class="num">${brl(ent.valor_total)}</td><td></td></tr>` })}
           ${ent.obs ? `<p class="small muted">${esc(ent.obs)}</p>` : ''}`,
         rodape: `${ehGestor() && ent.status === 'ativa' ? '<button class="btn perigo esq" id="e-estornar">Estornar entrada</button>' : ''}<button class="btn sec" data-fechar>Fechar</button>`,
       });
@@ -1041,6 +1045,8 @@
     } catch (e) { falha(e); }
   }
 
+  // Cada item: embalagens pagas × preço da embalagem − desconto do item. Bonificadas entram no estoque sem custo.
+  // O desconto na nota é dividido entre os itens na proporção do valor de cada um.
   function formEntrada() {
     const d = abrirModal({
       titulo: 'Nova entrada', classe: 'largo',
@@ -1053,58 +1059,114 @@
         </div>
         <div class="campo"><label>Itens</label><div class="itens-lista" id="e-itens"></div>
           <div><button type="button" class="btn sec mini mt" id="e-add">${ic('mais')} Adicionar item</button></div></div>
-        <div class="campo"><label>Observação</label><input type="text" id="e-obs"></div>
-        <div class="total-box"><span class="muted" id="e-qtd"></span><b id="e-total">${brl(0)}</b></div>`,
+        <div class="linha-campos">
+          <div class="campo"><label>Desconto na nota (R$) <span class="muted">· dividido entre os itens</span></label><input type="number" id="e-desc-nota" min="0" step="0.01" placeholder="0,00"></div>
+          <div class="campo" style="grid-column: span 2"><label>Observação</label><input type="text" id="e-obs"></div>
+        </div>
+        <div class="total-box ent-total">
+          <div class="ent-resumo"><span><span class="muted">Valor bruto</span> <b id="e-bruto">${brl(0)}</b></span>
+            <span><span class="muted">Descontos</span> <b class="neg" id="e-descs">${brl(0)}</b></span>
+            <span><span class="muted">Bonificado</span> <b class="pos" id="e-bonif">—</b></span></div>
+          <div class="ent-pagar"><span class="muted" id="e-qtd"></span><span class="muted">Total a pagar</span><b id="e-total">${brl(0)}</b></div>
+        </div>`,
       rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="e-salvar">Dar entrada</button>`,
     });
     const lista = d.$('#e-itens');
-    const total = () => {
-      const linhas = d.$$('.item-linha');
-      d.$('#e-total').textContent = brl(linhas.reduce((s, l) => s + n(l.querySelector('[data-v]').value), 0));
-      d.$('#e-qtd').textContent = `${linhas.length} item(ns)`;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    const ler = (l) => ({
+      ins: insPorId(l.querySelector('[data-i]').value), emb: n(l.querySelector('[data-e]').value), cont: n(l.querySelector('[data-c]').value),
+      preco: n(l.querySelector('[data-p]').value), bon: n(l.querySelector('[data-b]').value), desc: n(l.querySelector('[data-d]').value),
+    });
+    const brutoLinha = (x) => r2(x.emb * x.preco);
+    const calc = () => {
+      const ls = d.$$('.item-linha').map((l) => ({ l, ...ler(l) }));
+      const bruto = ls.reduce((s, x) => s + brutoLinha(x), 0);
+      const descItens = ls.reduce((s, x) => s + Math.min(x.desc, brutoLinha(x)), 0);
+      const baseNota = bruto - descItens;
+      const descNota = Math.min(n(d.$('#e-desc-nota').value), Math.max(baseNota, 0));
+      let rateado = 0;
+      ls.forEach((x, k) => {
+        const liq = brutoLinha(x) - Math.min(x.desc, brutoLinha(x));
+        const parte = k === ls.length - 1 ? r2(descNota - rateado) : (baseNota > 0 ? r2(descNota * liq / baseNota) : 0);
+        rateado += parte;
+        x.valor = Math.max(r2(liq - parte), 0); x.descNota = parte;
+        x.qtd = (x.emb + x.bon) * x.cont;
+      });
+      return { ls, bruto: r2(bruto), descontos: r2(descItens + descNota), total: r2(ls.reduce((s, x) => s + x.valor, 0)) };
+    };
+    const atualizar = () => {
+      const c = calc();
+      c.ls.forEach((x) => {
+        const u = x.ins?.unidade || '';
+        x.l.querySelector('[data-u]').textContent = u ? `(${u})` : '';
+        if (document.activeElement !== x.l.querySelector('[data-t]')) x.l.querySelector('[data-t]').value = x.emb || x.preco ? (brutoLinha(x) - Math.min(x.desc, brutoLinha(x))).toFixed(2) : '';
+        const partes = [];
+        if (x.ins && x.qtd > 0) partes.push(`${qtdFmt(x.qtd, u)} no estoque`);
+        if (x.bon > 0) partes.push(`${fmtAuto(x.bon)} emb. bonificada(s)`);
+        if (x.desc > 0 || x.descNota > 0) partes.push(`desconto ${brl(Math.min(x.desc, brutoLinha(x)) + x.descNota)}`);
+        if (x.ins && x.qtd > 0) partes.push(`custo real ${custoUnFmt(x.valor / x.qtd, u)}`);
+        x.l.querySelector('[data-info]').textContent = partes.join(' · ');
+      });
+      const bonEmb = c.ls.reduce((s, x) => s + x.bon, 0);
+      const bonVal = c.ls.reduce((s, x) => s + x.bon * (x.preco || n(x.ins?.custo_referencia) * x.cont), 0);
+      d.$('#e-bruto').textContent = brl(c.bruto);
+      d.$('#e-descs').textContent = c.descontos ? '− ' + brl(c.descontos) : brl(0);
+      d.$('#e-bonif').textContent = bonEmb ? `${fmtAuto(bonEmb)} emb. (≈ ${brl(bonVal)})` : '—';
+      d.$('#e-total').textContent = brl(c.total);
+      d.$('#e-qtd').textContent = `${c.ls.length} item(ns)`;
     };
     const addLinha = () => {
       const l = document.createElement('div');
-      l.className = 'item-linha';
+      l.className = 'item-linha ent';
       l.innerHTML = `
         <div class="campo"><label>Insumo</label><select data-i>${selInsumoOpcoes()}</select></div>
-        <div class="campo"><label>Embalagens</label><input type="number" data-e min="0" step="any" value="1"></div>
-        <div class="campo"><label>Conteúdo/emb. <span data-u class="muted"></span></label><input type="number" data-c min="0" step="any"></div>
-        <div class="campo"><label>Valor total (R$)</label><input type="number" data-v min="0" step="0.01"></div>
+        <div class="campo"><label>Emb. pagas</label><input type="number" data-e min="0" step="any" value="1"></div>
+        <div class="campo"><label>Conteúdo <span data-u class="muted"></span></label><input type="number" data-c min="0" step="any"></div>
+        <div class="campo"><label>Preço por emb. (R$)</label><input type="number" data-p min="0" step="0.01" inputmode="decimal"></div>
+        <div class="campo"><label>Total do item (R$)</label><input type="number" data-t min="0" step="0.01" inputmode="decimal"></div>
         <div class="campo"><label>Validade</label><input type="date" data-val></div>
         <div><button type="button" class="icone-btn" data-rm title="Remover">${ic('lixo')}</button></div>
+        <details class="ent-extra"><summary>Desconto ou bonificação</summary>
+          <div class="ent-extra-campos">
+            <div class="campo"><label>Emb. bonificadas (grátis)</label><input type="number" data-b min="0" step="any" placeholder="0"></div>
+            <div class="campo"><label>Desconto no item (R$)</label><input type="number" data-d min="0" step="0.01" placeholder="0,00"></div>
+          </div></details>
         <div class="small muted" data-info style="grid-column:1/-1;margin-top:-4px"></div>`;
       lista.appendChild(l);
-      const sel = l.querySelector('[data-i]'), emb = l.querySelector('[data-e]'), cont = l.querySelector('[data-c]'), val = l.querySelector('[data-v]');
-      const info = () => {
-        const i = insPorId(sel.value); const q = n(emb.value) * n(cont.value);
-        l.querySelector('[data-u]').textContent = i ? `(${i.unidade})` : '';
-        l.querySelector('[data-info]').textContent = i && q > 0 ? `${qtdFmt(q, i.unidade)} · ${n(val.value) ? custoUnFmt(n(val.value) / q, i.unidade) : ''}` : '';
-        total();
-      };
+      const sel = l.querySelector('[data-i]'), emb = l.querySelector('[data-e]'), cont = l.querySelector('[data-c]'),
+        preco = l.querySelector('[data-p]'), tot = l.querySelector('[data-t]'), bon = l.querySelector('[data-b]'), desc = l.querySelector('[data-d]');
       sel.onchange = () => {
         const i = insPorId(sel.value);
-        if (i) { cont.value = n(i.embalagem_padrao) || 1; if (!val.value) val.value = (n(i.custo_referencia) * (n(i.embalagem_padrao) || 1) * n(emb.value)).toFixed(2); }
-        info();
+        if (i) { cont.value = n(i.embalagem_padrao) || 1; if (!preco.value) preco.value = (n(i.custo_referencia) * (n(i.embalagem_padrao) || 1)).toFixed(2); }
+        atualizar();
       };
-      emb.oninput = cont.oninput = val.oninput = info;
-      l.querySelector('[data-rm]').onclick = () => { l.remove(); total(); };
-      total();
+      [emb, cont, preco, bon, desc].forEach((x) => { x.oninput = atualizar; });
+      d.$('#e-desc-nota').oninput = atualizar;
+      // digitou o total do item: calcula o preço por embalagem
+      tot.oninput = () => { if (n(emb.value) > 0) preco.value = ((n(tot.value) + n(desc.value)) / n(emb.value)).toFixed(4).replace(/\.?0+$/, ''); atualizar(); };
+      tot.onblur = atualizar;
+      l.querySelector('[data-rm]').onclick = () => { l.remove(); atualizar(); };
+      atualizar();
     };
     d.$('#e-add').onclick = addLinha; addLinha();
     d.$('#e-novo-forn').onclick = () => formFornecedor(null, (f) => { d.$('#e-forn').innerHTML = opcoes(S.cat.fornecedores.filter((x) => x.ativo), f.id, { vazio: 'Sem fornecedor' }); });
     d.$('#e-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
-      const itens = d.$$('.item-linha').map((l) => ({
-        insumo_id: l.querySelector('[data-i]').value,
-        quantidade: n(l.querySelector('[data-e]').value) * n(l.querySelector('[data-c]').value),
-        valor_total: n(l.querySelector('[data-v]').value), validade: l.querySelector('[data-val]').value || null,
-      })).filter((i) => i.insumo_id);
-      if (!itens.length) throw new Error('Adicione ao menos um item.');
-      if (itens.some((i) => i.quantidade <= 0)) throw new Error('Confira as quantidades.');
+      const c = calc();
+      const ls = c.ls.filter((x) => x.ins);
+      if (!ls.length) throw new Error('Adicione ao menos um item.');
+      if (ls.some((x) => x.qtd <= 0)) throw new Error('Confira as quantidades (embalagens pagas ou bonificadas e o conteúdo).');
+      if (ls.some((x) => x.emb > 0 && x.preco <= 0)) throw new Error('Informe o preço das embalagens pagas (ou lance como bonificadas).');
+      const itens = ls.map((x) => {
+        const obs = [];
+        if (x.bon > 0) obs.push(`${fmtAuto(x.emb)} paga(s) + ${fmtAuto(x.bon)} bonificada(s)`);
+        if (x.desc > 0 || x.descNota > 0) obs.push(`desconto ${brl(Math.min(x.desc, brutoLinha(x)) + x.descNota)}`);
+        if (obs.length) obs.unshift(`${brl(x.preco)}/emb.`);
+        return { insumo_id: x.ins.id, quantidade: x.qtd, valor_total: x.valor, validade: x.l.querySelector('[data-val]').value || null, obs: obs.join(' · ') || null };
+      });
       await rpc('rpc_registrar_entrada', { p: { unidade_id: S.un, data: d.$('#e-data').value, fornecedor_id: d.$('#e-forn').value || null,
-        documento: d.$('#e-doc').value.trim(), obs: d.$('#e-obs').value.trim(), itens } });
+        documento: d.$('#e-doc').value.trim(), obs: d.$('#e-obs').value.trim(), valor_bruto: c.bruto, itens } });
       await Promise.all([carregarCatalogo(), carregarEstoqueIns()]);
-      d.fechar(); toast('Entrada registrada!', 'ok'); recarregar();
+      d.fechar(); toast(`Entrada registrada · ${brl(c.total)}`, 'ok'); recarregar();
     });
   }
 
