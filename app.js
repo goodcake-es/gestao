@@ -472,7 +472,8 @@
   async function entrarNaUnidade(id) {
     S.un = id;
     try { await carregarEstoqueIns(); } catch (e) { falha(e); }
-    if (!location.hash || location.hash === '#') location.hash = '#/painel';
+    // depois do login e da escolha da unidade, sempre começa no Painel
+    history.replaceState(null, '', location.pathname + location.search + '#/painel');
     montarApp();
   }
 
