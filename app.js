@@ -38,6 +38,17 @@
   const fimMes = (d) => { const x = new Date(d.slice(0, 8) + '01T12:00:00'); x.setMonth(x.getMonth() + 1); x.setDate(0); return x.toLocaleDateString('sv-SE'); };
   const potesPorReceita = () => n(S.cat.config.potes_por_receita) || 8;
   const metaCmv = () => n(S.cat.config.meta_cmv) || 0.35;
+  const potesRecheio = () => n(S.cat.config.potes_por_recheio) || 10;
+  // quantos potes uma receita do preparo rende: rendimento ÷ maior porção usada num sabor
+  // (para preparo usado dentro de outro, como o recheio base, vale o rendimento do preparo de cima)
+  function potesDoPreparo(id, nivel = 0) {
+    const pr = S.cat.preparos.find((x) => x.id === id); if (!pr || nivel > 4) return null;
+    const porPote = Math.max(0, ...S.cat.produtoItens.filter((i) => i.preparo_id === id).map((i) => n(i.quantidade)));
+    if (porPote > 0) return n(pr.rendimento) / porPote;
+    const pai = S.cat.preparoItens.find((i) => i.sub_preparo_id === id);
+    if (pai) { const k = potesDoPreparo(pai.preparo_id, nivel + 1); return k ? k * n(pai.quantidade) / n(pr.rendimento) : null; }
+    return null;
+  }
   const ehAdmin = () => S.perfil?.papel === 'admin';
   const ehGestor = () => ['admin', 'gestor'].includes(S.perfil?.papel);
   const NOMES_PAPEL = { admin: 'Administrador', gestor: 'Gestor', operador: 'Operador', pendente: 'Pendente' };
@@ -90,6 +101,7 @@
     whats: '<path d="M4 20l1.3-3.9A8 8 0 1112 20a8 8 0 01-4.1-1.1L4 20z"/>',
     perda: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
     lapis: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+    receita: '<path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3z"/><path d="M5 17a3 3 0 013-3h11"/><path d="M9 8h6"/>',
     banco: '<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 21h18"/>',
   };
   const ic = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[k] || ''}</svg>`;
@@ -405,6 +417,7 @@
     { id: 'reservas', t: 'Reservas', ic: 'reserva', g: 'Operação' },
     { id: 'producao', t: 'Produção', ic: 'producao', g: 'Operação' },
     { id: 'contagem', t: 'Contagem semanal', ic: 'contagem', g: 'Operação' },
+    { id: 'receitas', t: 'Receitas', ic: 'receita', g: 'Operação' },
     { id: 'estoque', t: 'Estoque', ic: 'estoque', g: 'Estoque' },
     { id: 'entradas', t: 'Entradas', ic: 'entrada', g: 'Estoque' },
     { id: 'perdas', t: 'Perdas', ic: 'perda', g: 'Estoque' },
@@ -768,7 +781,7 @@
     const rec = ult30.reduce((s, p) => s + n(p.receitas), 0);
     const pr = potesPorReceita();
 
-    el.innerHTML = cabecalho('Produção', `${esc(nomeCurto(unAtual()))} · receita padrão = 1 massa + 1 recheio base = <b>${pr} potes de 220 ml</b>`,
+    el.innerHTML = cabecalho('Produção', `${esc(nomeCurto(unAtual()))} · 1 receita = 1 massa = <b>${pr} potes de 220 ml</b> (o recheio rende ${potesRecheio()})`,
       `<button class="btn" id="b-nova">${ic('mais')} Registrar produção</button>`) + `
       <div class="grade k4">
         <div class="kpi"><div class="rotulo">Receitas (30 dias)</div><div class="valor">${fmtAuto(rec)}</div><div class="det">${fmt(ult30.length)} produções</div></div>
@@ -1382,17 +1395,17 @@
             <span class="muted">CMV</span><span>${badgeCmv(cmv)}</span></div></div>`;
       }).join('')}</div>`;
     } else {
-      corpo = `<div class="card">${tabela(['Código', 'Preparo', '#Rendimento', '#Custo da receita', '#Custo/kg', '#Por pote*'],
+      corpo = `<div class="card">${tabela(['Código', 'Preparo', '#Rendimento', '#Custo da receita', '#Custo/kg', '#Rende*'],
         S.cat.preparos.map((p) => {
           const cg = custoPreparoG(p.id);
           return `<tr class="clicavel" data-prep="${p.id}"><td>${esc(p.codigo)}</td><td><b>${esc(p.nome)}</b>${p.ativo ? '' : ' <span class="badge cinza">inativo</span>'}</td>
             <td class="num">${qtdFmt(p.rendimento, 'g')}</td><td class="num">${brl(cg * n(p.rendimento))}</td><td class="num">${brl(cg * 1000)}</td>
-            <td class="num">${qtdFmt(n(p.rendimento) / pr, 'g')}</td></tr>`;
-        }))}<p class="small muted">* rendimento ÷ ${pr}: quanto de cada preparo vai num pote quando a receita inteira vira ${pr} potes.</p></div>`;
+            <td class="num">${potesDoPreparo(p.id) ? `${fmt(potesDoPreparo(p.id), 0)} potes` : '—'}<div class="small muted">${potesDoPreparo(p.id) ? qtdFmt(n(p.rendimento) / potesDoPreparo(p.id), 'g') + ' por pote' : ''}</div></td></tr>`;
+        }))}<p class="small muted">* quantos potes uma receita rende, pela maior porção usada nas fichas dos sabores.</p></div>`;
     }
     el.innerHTML = cabecalho('Fichas técnicas', `Custos calculados com o custo médio de <b>${esc(nomeCurto(unAtual()))}</b> · meta de CMV ${pct(meta, 0)}`,
       ehGestor() ? `<button class="btn" id="b-novo">${ic('mais')} ${S.abaFic === 'produtos' ? 'Novo sabor' : 'Novo preparo'}</button>` : '') + `
-      <div class="aviso rosa"><span><b>Receita padrão:</b> 1 massa + 1 recheio base = <b>${pr} potes de 220 ml</b>. As quantidades por pote são 1/${pr} da receita.</span></div>
+      <div class="aviso rosa"><span><b>Rendimento padrão:</b> 1 massa = <b>${pr} potes</b> (75 g por pote) · 1 recheio = <b>${potesRecheio()} potes</b> (cerca de 142 g por pote). Pote de 220 ml.</span></div>
       <div class="abas mt">${[['produtos', 'Sabores (potes)'], ['preparos', 'Preparos (massa, cremes, geleia)']].map(([k, t]) => `<button data-aba="${k}" class="${S.abaFic === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
       ${corpo}`;
     $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaFic = b.dataset.aba; recarregar(); }; });
@@ -1443,14 +1456,16 @@
           <div class="kpi cacau"><div class="rotulo">Margem</div><div class="valor" id="k-margem">—</div></div>
           <div class="kpi"><div class="rotulo">CMV</div><div class="valor" id="k-cmv">—</div><div class="det" id="k-sug"></div></div>
         </div>
-        <div class="linha-campos mt">
-          <div class="campo"><label>Montagem</label><textarea id="f-mont" ${dis}>${esc(p?.montagem || '')}</textarea></div>
-          <div class="campo"><label>Alergênicos (etiqueta)</label><textarea id="f-aler" ${dis}>${esc(p?.alergenos || 'Contém leite, ovo e glúten.')}</textarea></div>
+        <div class="campo mt"><label>Montagem <span class="muted">· um passo por linha, de baixo para cima</span></label><textarea id="f-mont" rows="6" ${dis}>${esc(p?.montagem || '')}</textarea></div>
+        <div class="linha-campos">
+          <div class="campo"><label>Pontos de atenção <span class="muted">· um por linha</span></label><textarea id="f-dicas" rows="3" ${dis}>${esc(p?.dicas || '')}</textarea></div>
+          <div class="campo"><label>Alergênicos (etiqueta)</label><textarea id="f-aler" rows="3" ${dis}>${esc(p?.alergenos || 'Contém leite, ovo e glúten.')}</textarea></div>
         </div>
         <label class="check"><input type="checkbox" id="f-ativo" ${p?.ativo === false ? '' : 'checked'} ${dis}> Sabor ativo (aparece em vendas, produção e reservas)</label>
         ${hist.length ? `<h3 class="mt">Histórico de preço</h3><ul class="lista-simples">${hist.map((h) => `<li><span class="grow small">${new Date(h.alterado_em).toLocaleString('pt-BR')}</span><span class="small">${brl(h.preco_anterior)} → <b>${brl(h.preco_novo)}</b></span></li>`).join('')}</ul>` : ''}`,
-      rodape: ed ? `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="f-salvar">Salvar ficha</button>` : '<button class="btn sec" data-fechar>Fechar</button>',
+      rodape: `${p ? '<button class="btn sec esq" id="f-receita">Ver receita</button>' : ''}` + (ed ? `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="f-salvar">Salvar ficha</button>` : '<button class="btn sec" data-fechar>Fechar</button>'),
     });
+    const brf = d.$('#f-receita'); if (brf) brf.onclick = () => { d.fechar(); receitaProduto(p); };
     const lista = d.$('#f-itens');
     const calc = () => {
       let tot = 0;
@@ -1466,10 +1481,11 @@
       d.$('#k-cmv').innerHTML = preco > 0 ? badgeCmv(tot / preco) : '—';
       d.$('#k-sug').textContent = tot > 0 ? `preço p/ meta ${pct(metaCmv(), 0)}: ${brl(tot / metaCmv())}` : '';
     };
-    const addLinha = (val = '', q = '') => {
-      const l = document.createElement('div'); l.className = 'item-linha f4';
+    const addLinha = (val = '', q = '', med = '') => {
+      const l = document.createElement('div'); l.className = 'item-linha f4m';
       l.innerHTML = `<div class="campo"><label>Componente</label><select data-c ${dis}>${opcoesComponente(val)}</select></div>
         <div class="campo"><label>Quantidade <span data-u class="muted"></span></label><input type="number" data-q min="0" step="any" value="${q}" ${dis}></div>
+        <div class="campo"><label>Medida caseira</label><input type="text" data-m value="${esc(med || '')}" placeholder="opcional" ${dis}></div>
         <div class="campo"><label>Custo</label><input type="text" data-custo disabled></div>
         <div>${ed ? `<button type="button" class="icone-btn" data-rm>${ic('lixo')}</button>` : ''}</div>`;
       // custo como texto
@@ -1479,7 +1495,7 @@
       l.querySelector('[data-c]').onchange = calc; l.querySelector('[data-q]').oninput = calc;
       const rm = l.querySelector('[data-rm]'); if (rm) rm.onclick = () => { l.remove(); calc(); };
     };
-    itens.forEach((i) => addLinha(i.insumo_id ? 'i:' + i.insumo_id : 'p:' + i.preparo_id, i.quantidade));
+    itens.forEach((i) => addLinha(i.insumo_id ? 'i:' + i.insumo_id : 'p:' + i.preparo_id, i.quantidade, i.medida));
     if (!itens.length && ed) {
       const massa = S.cat.preparos.find((x) => x.codigo === 'PB-01');
       if (massa) addLinha('p:' + massa.id, n(massa.rendimento) / potesPorReceita()); else addLinha();
@@ -1492,11 +1508,11 @@
     if (bs) bs.onclick = (e) => ocupado(e.currentTarget, async () => {
       const its = d.$$('.item-linha').map((l) => {
         const [t, id] = (l.querySelector('[data-c]').value || ':').split(':');
-        return id ? { [t === 'i' ? 'insumo_id' : 'preparo_id']: id, quantidade: n(l.querySelector('[data-q]').value) } : null;
+        return id ? { [t === 'i' ? 'insumo_id' : 'preparo_id']: id, quantidade: n(l.querySelector('[data-q]').value), medida: l.querySelector('[data-m]').value.trim() } : null;
       }).filter((x) => x && x.quantidade > 0);
       await rpc('rpc_salvar_produto', { p: {
         id: p?.id || null, codigo: d.$('#f-cod').value, nome: d.$('#f-nome').value, linha: d.$('#f-linha').value,
-        preco_venda: n(d.$('#f-preco').value), montagem: d.$('#f-mont').value, alergenos: d.$('#f-aler').value,
+        preco_venda: n(d.$('#f-preco').value), montagem: d.$('#f-mont').value, dicas: d.$('#f-dicas').value, alergenos: d.$('#f-aler').value,
         ativo: d.$('#f-ativo').checked, itens: its } });
       await carregarCatalogo();
       d.fechar(); toast('Ficha técnica salva!', 'ok'); recarregar();
@@ -1521,12 +1537,17 @@
         <div class="grade k3 mt">
           <div class="kpi"><div class="rotulo">Custo da receita</div><div class="valor" id="k-tot">—</div></div>
           <div class="kpi dourado"><div class="rotulo">Custo por kg</div><div class="valor" id="k-kg">—</div></div>
-          <div class="kpi cacau"><div class="rotulo">Por pote (÷${pr})</div><div class="valor" id="k-pote">—</div><div class="det" id="k-pote-g"></div></div>
+          <div class="kpi cacau"><div class="rotulo">Por pote${p && potesDoPreparo(p.id) ? ` (rende ${fmt(potesDoPreparo(p.id), 0)})` : ''}</div><div class="valor" id="k-pote">—</div><div class="det" id="k-pote-g"></div></div>
         </div>
-        <div class="campo mt"><label>Modo de preparo</label><textarea id="g-modo" rows="4" ${dis}>${esc(p?.modo_preparo || '')}</textarea></div>
+        <div class="campo mt"><label>Modo de preparo <span class="muted">· um passo por linha</span></label><textarea id="g-modo" rows="8" ${dis}>${esc(p?.modo_preparo || '')}</textarea></div>
+        <div class="linha-campos">
+          <div class="campo"><label>Tempo</label><input type="text" id="g-tempo" value="${esc(p?.tempo || '')}" placeholder="Ex.: 15 min + 3 h de geladeira" ${dis}></div>
+          <div class="campo" style="grid-column: span 2"><label>Pontos de atenção <span class="muted">· um por linha</span></label><textarea id="g-dicas" rows="3" ${dis}>${esc(p?.dicas || '')}</textarea></div>
+        </div>
         <label class="check"><input type="checkbox" id="g-ativo" ${p?.ativo === false ? '' : 'checked'} ${dis}> Preparo ativo</label>`,
-      rodape: ed ? `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="g-salvar">Salvar preparo</button>` : '<button class="btn sec" data-fechar>Fechar</button>',
+      rodape: `${p ? '<button class="btn sec esq" id="g-receita">Ver receita</button>' : ''}` + (ed ? `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="g-salvar">Salvar preparo</button>` : '<button class="btn sec" data-fechar>Fechar</button>'),
     });
+    const brg = d.$('#g-receita'); if (brg) brg.onclick = () => { d.fechar(); receitaPreparo(p); };
     const calc = () => {
       let tot = 0;
       d.$$('.item-linha').forEach((l) => {
@@ -1538,20 +1559,22 @@
       const rend = n(d.$('#g-rend').value);
       d.$('#k-tot').textContent = brl(tot);
       d.$('#k-kg').textContent = rend ? brl(tot / rend * 1000) : '—';
-      d.$('#k-pote').textContent = brl(tot / pr);
-      d.$('#k-pote-g').textContent = rend ? `${qtdFmt(rend / pr, 'g')} por pote` : '';
+      const np = (p && potesDoPreparo(p.id)) || pr;
+      d.$('#k-pote').textContent = brl(tot / np);
+      d.$('#k-pote-g').textContent = rend ? `${qtdFmt(rend / np, 'g')} por pote` : '';
     };
-    const addLinha = (val = '', q = '') => {
-      const l = document.createElement('div'); l.className = 'item-linha f4';
+    const addLinha = (val = '', q = '', med = '') => {
+      const l = document.createElement('div'); l.className = 'item-linha f4m';
       l.innerHTML = `<div class="campo"><label>Ingrediente ou sub-preparo</label><select data-c ${dis}>${opcoesComponente(val, 's', p?.id)}</select></div>
         <div class="campo"><label>Quantidade <span data-u class="muted"></span></label><input type="number" data-q min="0" step="any" value="${q}" ${dis}></div>
+        <div class="campo"><label>Medida caseira</label><input type="text" data-m value="${esc(med || '')}" placeholder="Ex.: 2 caixinhas" ${dis}></div>
         <div class="campo"><label>Custo</label><div data-custo class="num" style="padding:9px 0"></div></div>
         <div>${ed ? `<button type="button" class="icone-btn" data-rm>${ic('lixo')}</button>` : ''}</div>`;
       d.$('#g-itens').appendChild(l);
       l.querySelector('[data-c]').onchange = calc; l.querySelector('[data-q]').oninput = calc;
       const rm = l.querySelector('[data-rm]'); if (rm) rm.onclick = () => { l.remove(); calc(); };
     };
-    itens.forEach((i) => addLinha(i.insumo_id ? 'i:' + i.insumo_id : 's:' + i.sub_preparo_id, i.quantidade));
+    itens.forEach((i) => addLinha(i.insumo_id ? 'i:' + i.insumo_id : 's:' + i.sub_preparo_id, i.quantidade, i.medida));
     if (!itens.length && ed) addLinha();
     d.$('#g-rend').oninput = calc;
     const ba = d.$('#g-add'); if (ba) ba.onclick = () => addLinha();
@@ -1560,13 +1583,126 @@
     if (bs) bs.onclick = (e) => ocupado(e.currentTarget, async () => {
       const its = d.$$('.item-linha').map((l) => {
         const [t, id] = (l.querySelector('[data-c]').value || ':').split(':');
-        return id ? { [t === 'i' ? 'insumo_id' : 'sub_preparo_id']: id, quantidade: n(l.querySelector('[data-q]').value) } : null;
+        return id ? { [t === 'i' ? 'insumo_id' : 'sub_preparo_id']: id, quantidade: n(l.querySelector('[data-q]').value), medida: l.querySelector('[data-m]').value.trim() } : null;
       }).filter((x) => x && x.quantidade > 0);
       await rpc('rpc_salvar_preparo', { p: { id: p?.id || null, codigo: d.$('#g-cod').value, nome: d.$('#g-nome').value,
-        rendimento: n(d.$('#g-rend').value), modo_preparo: d.$('#g-modo').value, ativo: d.$('#g-ativo').checked, itens: its } });
+        rendimento: n(d.$('#g-rend').value), modo_preparo: d.$('#g-modo').value, tempo: d.$('#g-tempo').value.trim(), dicas: d.$('#g-dicas').value, ativo: d.$('#g-ativo').checked, itens: its } });
       await carregarCatalogo();
       d.fechar(); toast('Preparo salvo!', 'ok'); recarregar();
     });
+  }
+
+  // ================================================================== RECEITAS (para a cozinha)
+  const PADRAO_MONTAGEM = [
+    'Pese cada camada na balança (tolerância de 5 g por camada).',
+    'Limpe a borda interna do pote antes de tampar.',
+    'Feche o lacre, cole a etiqueta e anote fabricação e validade.',
+    'Leve à geladeira (0 a 5 °C) em até 30 minutos.',
+    'Validade: 3 dias refrigerado. Fora da geladeira, no máximo 2 horas (bolsa térmica com gelo).',
+  ];
+  const linhasTexto = (t) => String(t || '').split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  const listaPassos = (t) => { const l = linhasTexto(t); return l.length ? `<ol class="passos">${l.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : '<p class="muted">Passo a passo ainda não cadastrado.</p>'; };
+  const listaDicas = (t) => { const l = linhasTexto(t); return l.length ? `<ul class="dicas">${l.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''; };
+  const nomeComp = (i) => i.insumo_id ? (insPorId(i.insumo_id)?.nome || '?') : i.sub_preparo_id ? (prepPorId(i.sub_preparo_id)?.nome || '?') : (prepPorId(i.preparo_id)?.nome || '?');
+  const unidCompItem = (i) => (i.insumo_id ? insPorId(i.insumo_id)?.unidade : 'g') || '';
+  const qtdRec = (q, u) => (u === 'un' ? fmtAuto(Math.round(n(q) * 100) / 100) + ' un' : qtdFmt(Math.round(n(q)), u));
+  const fatorTxt = (f) => (f === 0.5 ? '½' : fmtAuto(f)) + '×';
+
+  async function vReceitas(el) {
+    const preps = S.cat.preparos.filter((p) => p.ativo);
+    const prods = S.cat.produtos.filter((p) => p.ativo);
+    el.innerHTML = cabecalho('Receitas', 'Ingredientes, medidas e passo a passo de cada base e de cada sabor.') + `
+      <h2 class="secao">Bases</h2>
+      <div class="receitas">${preps.map((p) => `
+        <button class="receita-card" data-rprep="${p.id}"><span class="cod">${esc(p.codigo)}</span><b>${esc(p.nome)}</b>
+          <span class="small muted">Rende ${qtdFmt(p.rendimento, 'g')}${p.tempo ? ' · ' + esc(p.tempo) : ''}</span></button>`).join('')}</div>
+      <h2 class="secao mt">Sabores · montagem do pote</h2>
+      <div class="receitas">${prods.map((p) => `
+        <button class="receita-card" data-rprod="${p.id}"><span class="cod">${esc(p.codigo)} · ${esc(p.linha)}</span><b>${esc(p.nome)}</b>
+          <span class="small muted">${linhasTexto(p.montagem).length} passos · pote 220 ml</span></button>`).join('')}</div>`;
+    $$('[data-rprep]', el).forEach((b) => { b.onclick = () => receitaPreparo(prepPorId(b.dataset.rprep)); });
+    $$('[data-rprod]', el).forEach((b) => { b.onclick = () => receitaProduto(prodPorId(b.dataset.rprod)); });
+  }
+
+  function receitaPreparo(p) {
+    if (!p) return;
+    const itens = S.cat.preparoItens.filter((i) => i.preparo_id === p.id)
+      .sort((a, b) => (a.sub_preparo_id ? 0 : 1) - (b.sub_preparo_id ? 0 : 1) || n(b.quantidade) - n(a.quantidade));
+    const fatores = [0.5, 1, 2, 3];
+    const d = abrirModal({
+      titulo: `${p.codigo} · ${p.nome}`, classe: 'largo receita',
+      corpo: `
+        <div class="receita-topo">
+          <div><span class="muted">Rende</span> <b id="r-rend">${qtdFmt(p.rendimento, 'g')}</b>${p.tempo ? ` <span class="muted">· ${esc(p.tempo)}</span>` : ''}</div>
+          <div class="seg" role="group" aria-label="Quantidade de receitas">${fatores.map((f) => `<button type="button" data-f="${f}" class="${f === 1 ? 'ativo' : ''}">${fatorTxt(f)}</button>`).join('')}</div>
+        </div>
+        <h3>Ingredientes</h3>
+        <div id="r-ing"></div>
+        <h3 class="mt">Modo de preparo</h3>
+        ${listaPassos(p.modo_preparo)}
+        ${linhasTexto(p.dicas).length ? `<h3 class="mt">Pontos de atenção</h3>${listaDicas(p.dicas)}` : ''}`,
+      rodape: `${ehGestor() ? '<button class="btn sec esq" id="r-editar">Editar ficha</button>' : ''}<button class="btn sec" id="r-print">Imprimir</button><button class="btn" data-fechar>Fechar</button>`,
+    });
+    const desenhar = (f) => {
+      d.$('#r-rend').textContent = qtdFmt(n(p.rendimento) * f, 'g');
+      d.$('#r-ing').innerHTML = tabela(['Ingrediente', '#Quantidade', 'Medida caseira'], itens.map((i) => {
+        const u = unidCompItem(i);
+        const med = i.medida ? (f === 1 ? esc(i.medida) : `${esc(i.medida)} <span class="muted">× ${f === 0.5 ? '½' : fmtAuto(f)}</span>`) : '<span class="muted">pesar</span>';
+        return `<tr><td><b>${esc(nomeComp(i))}</b>${i.sub_preparo_id ? ` <span class="badge rosa">${esc(prepPorId(i.sub_preparo_id)?.codigo || '')}</span>` : ''}</td>
+          <td class="num">${qtdRec(n(i.quantidade) * f, u)}</td><td>${med}</td></tr>`;
+      }), { vazio: 'Sem ingredientes cadastrados.' });
+      d.$$('[data-f]').forEach((b) => b.classList.toggle('ativo', n(b.dataset.f) === f));
+    };
+    d.$$('[data-f]').forEach((b) => { b.onclick = () => desenhar(n(b.dataset.f)); });
+    desenhar(1);
+    d.$('#r-print').onclick = () => imprimirModal(d);
+    const be = d.$('#r-editar'); if (be) be.onclick = () => { d.fechar(); fichaPreparo(p); };
+  }
+
+  function receitaProduto(p) {
+    if (!p) return;
+    const ordem = (i) => i.preparo_id ? '0' + (prepPorId(i.preparo_id)?.codigo || '') : ({ Ingrediente: '1', Embalagem: '2' }[insPorId(i.insumo_id)?.categoria] || '3') + (insPorId(i.insumo_id)?.nome || '');
+    const itens = S.cat.produtoItens.filter((i) => i.produto_id === p.id).sort((a, b) => ordem(a).localeCompare(ordem(b)));
+    const d = abrirModal({
+      titulo: `${p.codigo} · ${p.nome}`, classe: 'largo receita',
+      corpo: `
+        <div class="receita-topo">
+          <div><span class="muted">Pote 220 ml · linha</span> <b>${esc(p.linha)}</b></div>
+          <div class="campo-inline"><label for="r-potes">Quantos potes?</label><input type="number" id="r-potes" min="1" step="1" value="1" inputmode="numeric"></div>
+        </div>
+        <h3>Componentes</h3>
+        <div id="r-comp"></div>
+        <h3 class="mt">Montagem (de baixo para cima)</h3>
+        ${listaPassos(p.montagem)}
+        ${linhasTexto(p.dicas).length ? `<h3 class="mt">Pontos de atenção</h3>${listaDicas(p.dicas)}` : ''}
+        <h3 class="mt">Padrão de qualidade</h3>
+        ${listaDicas(PADRAO_MONTAGEM.join('\n'))}
+        ${p.alergenos ? `<h3 class="mt">Alergênicos (etiqueta)</h3><p style="margin:0">${esc(p.alergenos)}</p>` : ''}`,
+      rodape: `${ehGestor() ? '<button class="btn sec esq" id="r-editar">Editar ficha</button>' : ''}<button class="btn sec" id="r-print">Imprimir</button><button class="btn" data-fechar>Fechar</button>`,
+    });
+    const desenhar = () => {
+      const k = Math.max(1, Math.round(n(d.$('#r-potes').value)) || 1);
+      d.$('#r-comp').innerHTML = tabela(['Componente', '#Por pote', k > 1 ? `#Para ${k} potes` : '#Total', ''], itens.map((i) => {
+        const u = unidCompItem(i); const prep = i.preparo_id ? prepPorId(i.preparo_id) : null;
+        const receitas = prep && n(prep.rendimento) ? (n(i.quantidade) * k) / n(prep.rendimento) : null;
+        return `<tr><td><b>${esc(nomeComp(i))}</b>${prep ? ` <span class="badge rosa">${esc(prep.codigo)}</span>` : ''}${i.medida ? `<div class="small muted">${esc(i.medida)}</div>` : ''}</td>
+          <td class="num">${qtdRec(i.quantidade, u)}</td><td class="num">${qtdRec(n(i.quantidade) * k, u)}</td>
+          <td class="small muted">${receitas !== null && k > 1 ? `≈ ${fmt(receitas, 2)} receita(s)` : ''}${prep ? ` <button type="button" class="link" data-ver-prep="${prep.id}">ver receita</button>` : ''}</td></tr>`;
+      }), { vazio: 'Sem componentes cadastrados.' });
+      d.$$('[data-ver-prep]').forEach((b) => { b.onclick = () => receitaPreparo(prepPorId(b.dataset.verPrep)); });
+    };
+    d.$('#r-potes').oninput = desenhar;
+    desenhar();
+    d.$('#r-print').onclick = () => imprimirModal(d);
+    const be = d.$('#r-editar'); if (be) be.onclick = () => { d.fechar(); fichaProduto(p); };
+  }
+
+  function imprimirModal(d) {
+    document.body.classList.add('imprimindo-modal');
+    const fim = () => { document.body.classList.remove('imprimindo-modal'); window.removeEventListener('afterprint', fim); };
+    window.addEventListener('afterprint', fim);
+    window.print();
+    setTimeout(fim, 1500);
   }
 
   // ================================================================== CADASTROS
@@ -1974,7 +2110,7 @@
   }
 
   const VIEWS = { painel: vPainel, vendas: vVendas, reservas: vReservas, producao: vProducao, contagem: vContagem, estoque: vEstoque,
-    entradas: vEntradas, perdas: vPerdas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios, financeiro: vFinanceiro };
+    entradas: vEntradas, perdas: vPerdas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios, financeiro: vFinanceiro, receitas: vReceitas };
 
   // ------------------------------------------------------------------ início
   window.addEventListener('hashchange', () => { if ($('#conteudo')) renderRota(); });
