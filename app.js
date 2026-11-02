@@ -90,6 +90,7 @@
     whats: '<path d="M4 20l1.3-3.9A8 8 0 1112 20a8 8 0 01-4.1-1.1L4 20z"/>',
     perda: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
     lapis: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+    banco: '<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 21h18"/>',
   };
   const ic = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[k] || ''}</svg>`;
 
@@ -409,6 +410,7 @@
     { id: 'perdas', t: 'Perdas', ic: 'perda', g: 'Estoque' },
     { id: 'transferencias', t: 'Transferências', ic: 'transf', g: 'Estoque' },
     { id: 'fichas', t: 'Fichas técnicas', ic: 'ficha', g: 'Gestão' },
+    { id: 'financeiro', t: 'Financeiro', ic: 'banco', g: 'Gestão', gestor: true },
     { id: 'cadastros', t: 'Cadastros', ic: 'cadastro', g: 'Gestão' },
     { id: 'usuarios', t: 'Usuários', ic: 'usuarios', g: 'Gestão', admin: true },
   ];
@@ -416,7 +418,7 @@
 
   function montarApp() {
     let grupo = '';
-    const nav = ROTAS.filter((r) => !r.admin || ehAdmin()).map((r) => {
+    const nav = ROTAS.filter((r) => (!r.admin || ehAdmin()) && (!r.gestor || ehGestor())).map((r) => {
       const g = r.g !== grupo ? `<div class="grupo">${r.g}</div>` : ''; grupo = r.g;
       const badge = r.id === 'usuarios' && S.pendentes ? `<span class="badge rosa">${S.pendentes}</span>` : '';
       return `${g}<a href="#/${r.id}" data-rota="${r.id}">${ic(r.ic)}<span>${r.t}</span>${badge}</a>`;
@@ -920,7 +922,7 @@
         <div class="kpi cacau"><div class="rotulo">Potes perdidos</div><div class="valor">${fmtAuto(potes)}</div><div class="det">${fmt(movs.length)} registro(s)</div></div>
         <div class="kpi"><div class="rotulo">Principal motivo</div><div class="valor" style="font-size:19px">${motivos.length ? esc(motivos[0][0]) : '—'}</div><div class="det">${motivos.length ? brl(motivos[0][1]) : 'sem perdas no período'}</div></div>
       </div>
-      <div class="grade k2 mt" style="grid-template-columns: 2fr 1fr">
+      <div class="grade lado mt">
         <div class="card">${tabela(['Data', 'Item', '#Quantidade', 'Motivo', '#Valor', 'Registrado por'],
           movs.map((m) => {
             const i = m.insumo_id ? insPorId(m.insumo_id) : null;
@@ -1625,6 +1627,249 @@
     });
   }
 
+  // ================================================================== FINANCEIRO (espelho da conta de cada unidade)
+  const CAT_SAIDA = ['Mercadoria / insumos', 'Embalagens', 'Equipamentos', 'Transporte / entrega', 'Marketing', 'Taxas e tarifas', 'Retirada / pró-labore', 'Outros'];
+  const CAT_ENTRADA = ['Recebimento de fiado', 'Reembolso', 'Outros'];
+  const TIPOS_FIN = {
+    venda: ['Venda', 'verde'], receita: ['Entrada avulsa', 'verde'], despesa: ['Saída', 'vermelho'],
+    emprestimo: ['Empréstimo', 'dourado'], amortizacao: ['Abatimento', 'cacau'], rateio: ['Compra conjunta', 'rosa'],
+    acerto_pago: ['Acerto pago', 'cinza'], acerto_recebido: ['Acerto recebido', 'cinza'],
+  };
+  const badgeFin = (t) => `<span class="badge ${(TIPOS_FIN[t] || [])[1] || ''}">${esc((TIPOS_FIN[t] || [t])[0])}</span>`;
+  const valorFin = (v) => `<b class="${n(v) < 0 ? 'neg' : 'pos'}">${n(v) < 0 ? '− ' : '+ '}${brl(Math.abs(n(v)))}</b>`;
+  let unidadesTodas = null;
+  async function todasUnidades() {
+    if (!unidadesTodas) unidadesTodas = await rpc('unidades_destino', {}).catch(() => S.unidades);
+    return unidadesTodas;
+  }
+
+  async function vFinanceiro(el) {
+    if (!ehGestor()) { el.innerHTML = '<div class="card vazio">O financeiro é só para gestores.</div>'; return; }
+    S.pFin = S.pFin || { de: inicioMes(), ate: hoje(), preset: 'mes' };
+    const { de, ate } = S.pFin;
+    const [r, lancs, pend, perfis, uns, rateios] = await Promise.all([
+      rpc('fin_resumo', { p_unidade: S.un, p_de: de, p_ate: ate }),
+      dados(sb.from('fin_lancamentos').select('*').eq('unidade_id', S.un).gte('data', de).lte('data', ate)
+        .order('data', { ascending: true }).order('criado_em', { ascending: true }).limit(2000)),
+      rpc('fin_pendencias', {}).catch(() => []),
+      dados(sb.from('perfis').select('id,nome')).catch(() => []),
+      todasUnidades(),
+      dados(sb.from('fin_rateios').select('*').gte('data', addDias(de, -60)).order('data', { ascending: false }).limit(200)).catch(() => []),
+    ]);
+    const partes = rateios.length ? await dados(sb.from('fin_rateio_partes').select('*').in('rateio_id', rateios.map((x) => x.id))).catch(() => []) : [];
+    const nomeUn = (id) => nomeCurto(uns.find((u) => u.id === id)) || 'outra unidade';
+    const nomePessoa = (id) => perfis.find((p) => p.id === id)?.nome || '—';
+    const saldo = n(r.saldo), divida = n(r.divida), liquido = saldo - divida + n(r.a_receber) - n(r.a_pagar);
+
+    // extrato com saldo corrido (estornados não mexem no saldo)
+    let corrido = n(r.saldo_anterior);
+    const linhas = lancs.map((l) => { if (!l.estornado) corrido += n(l.valor); return { ...l, saldo: corrido }; }).reverse();
+    const minhasPend = (pend || []).filter((p) => p.devedor_id === S.un || p.credor_id === S.un);
+    const meusRateios = rateios.filter((x) => x.pagante_id === S.un || partes.some((p) => p.rateio_id === x.id && p.unidade_id === S.un));
+
+    el.innerHTML = cabecalho('Financeiro', `${esc(unAtual()?.nome)} · espelho da conta bancária da unidade`,
+      `<div id="periodo"></div>
+       <button class="btn sec" id="b-rateio">${ic('transf')} Compra conjunta</button>
+       <button class="btn sec" id="b-receita">${ic('mais')} Entrada avulsa</button>
+       <button class="btn" id="b-despesa">${ic('perda')} Lançar saída</button>`) + `
+      <div class="grade k4">
+        <div class="kpi ${saldo < 0 ? 'alerta' : ''}"><div class="rotulo">Saldo em conta</div><div class="valor ${saldo < 0 ? 'neg' : ''}">${brl(saldo)}</div><div class="det">deve bater com o banco</div></div>
+        <div class="kpi dourado"><div class="rotulo">Empréstimo em aberto</div><div class="valor">${brl(divida)}</div><div class="det">emprestado ${brl(r.emprestado)} · já abatido ${brl(r.amortizado)}</div></div>
+        <div class="kpi cacau"><div class="rotulo">Situação líquida</div><div class="valor ${liquido < 0 ? 'neg' : 'pos'}">${brl(liquido)}</div><div class="det">${liquido < 0 ? 'falta isso para sair do vermelho' : 'livre depois de pagar tudo'}</div></div>
+        <div class="kpi"><div class="rotulo">No período</div><div class="valor" style="font-size:19px"><span class="pos">+ ${brl(r.entradas)}</span><br><span class="neg">− ${brl(r.saidas)}</span></div><div class="det">vendas ${brl(r.vendas)}</div></div>
+      </div>
+      ${ehAdmin() ? `<div class="aviso mt"><span>Empréstimo: entra dinheiro na conta e aumenta a dívida. Abatimento: sai da conta e diminui a dívida.</span>
+        <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec mini" id="b-emp">Pegar empréstimo</button><button class="btn mini" id="b-amort" ${divida <= 0 ? 'disabled' : ''}>Abater empréstimo</button></span></div>` : ''}
+      ${minhasPend.length ? `<div class="card mt"><h2>Acertos entre unidades</h2><ul class="lista-simples">${minhasPend.map((p) => `
+        <li><div class="grow">${p.devedor_id === S.un ? `<b>${esc(nomeCurto(unAtual()))}</b> deve para <b>${esc(nomeUn(p.credor_id))}</b>` : `<b>${esc(nomeUn(p.devedor_id))}</b> deve para <b>${esc(nomeCurto(unAtual()))}</b>`}
+          <div class="small muted">sobra de compras conjuntas ainda não acertada</div></div>
+          <b class="num ${p.devedor_id === S.un ? 'neg' : 'pos'}">${brl(p.valor)}</b>
+          ${ehAdmin() ? `<button class="btn mini" data-acerto="${p.devedor_id}|${p.credor_id}|${p.valor}">Registrar acerto</button>` : ''}</li>`).join('')}</ul></div>` : ''}
+      <div class="grade lado mt">
+        <div class="card"><div class="card-topo"><h2>Extrato</h2><button class="btn sec mini" id="b-csv" title="Baixar o extrato do período em planilha (CSV)">Exportar extrato</button></div>${tabela(['Data', 'Descrição', 'Tipo', '#Valor', '#Saldo', ''],
+          linhas.map((l) => `<tr class="${l.estornado ? 'riscado' : ''}">
+            <td>${dataCurta(l.data)}</td>
+            <td><b>${esc(l.descricao || (TIPOS_FIN[l.tipo] || [l.tipo])[0])}</b><div class="small muted">${[l.categoria, l.criado_por ? nomePessoa(l.criado_por) : null].filter(Boolean).map(esc).join(' · ')}${l.estornado ? ' · estornado: ' + esc(l.estorno_motivo || '') : ''}</div>${l.rateio_id && l.tipo === 'rateio' ? `<div class="small">${partes.filter((p) => p.rateio_id === l.rateio_id).map((p) => `${esc(nomeUn(p.unidade_id))} ${brl(p.valor)}`).join(' · ')}</div>` : ''}</td>
+            <td>${badgeFin(l.tipo)}</td><td class="num">${valorFin(l.valor)}</td>
+            <td class="num ${l.saldo < 0 ? 'neg' : ''}">${l.estornado ? '' : brl(l.saldo)}</td>
+            <td>${!l.estornado && podeEstornarFin(l) ? `<button class="btn perigo mini" data-estornar="${l.id}">Estornar</button>` : ''}</td></tr>`),
+          { vazio: 'Nenhum lançamento no período.', rodape: `<tr><td colspan="3">Saldo em ${dataBR(de)} (início)</td><td></td><td class="num">${brl(r.saldo_anterior)}</td><td></td></tr>
+            <tr><td colspan="3">Saldo em ${dataBR(ate)} (fim)</td><td></td><td class="num">${brl(r.saldo_final)}</td><td></td></tr>` })}</div>
+        <div>
+          <div class="card"><h2>Saídas por categoria</h2>${(r.por_categoria || []).length ? `<ul class="lista-simples">${r.por_categoria.map((c) => `
+            <li><div class="grow">${esc(c.categoria)}<div class="barra-prog"><i style="width:${n(r.despesas) ? (n(c.total) / n(r.despesas) * 100).toFixed(1) : 0}%"></i></div></div><b class="num">${brl(c.total)}</b></li>`).join('')}</ul>`
+            : '<div class="vazio">Sem saídas no período.</div>'}
+            <p class="small muted" style="margin:14px 0 0">Vendas entram sozinhas no saldo (fiado só quando receber, como entrada avulsa). Venda cancelada sai do saldo.</p></div>
+          <div class="card mt"><h2>Compras conjuntas</h2>${meusRateios.length ? `<ul class="lista-simples">${meusRateios.slice(0, 12).map((x) => `
+            <li class="${x.estornado ? 'riscado' : ''}"><div class="grow"><b>${esc(x.descricao)}</b><div class="small muted">${dataCurta(x.data)} · pagou: ${x.pagante_id ? esc(nomeUn(x.pagante_id)) : 'dinheiro de fora (empréstimo)'}${x.estornado ? ' · estornada' : ''}</div>
+              <div class="small">${partes.filter((p) => p.rateio_id === x.id).map((p) => `${esc(nomeUn(p.unidade_id))} ${brl(p.valor)}`).join(' · ')}</div></div>
+              <b class="num">${brl(x.valor_total)}</b>${ehAdmin() && !x.estornado ? `<button class="icone-btn" data-estornar-rateio="${x.id}" title="Estornar compra conjunta">${ic('lixo')}</button>` : ''}</li>`).join('')}</ul>`
+            : '<div class="vazio">Nenhuma compra conjunta recente.</div>'}</div>
+        </div>
+      </div>`;
+    seletorPeriodo($('#periodo', el), (np) => { S.pFin = np; recarregar(); }, S.pFin);
+    $('#b-despesa', el).onclick = () => formLancFin('despesa', r);
+    $('#b-receita', el).onclick = () => formLancFin('receita', r);
+    $('#b-rateio', el).onclick = () => formRateio();
+    const be = $('#b-emp', el); if (be) be.onclick = () => formLancFin('emprestimo', r);
+    const ba = $('#b-amort', el); if (ba) ba.onclick = () => formLancFin('amortizacao', r);
+    $('#b-csv', el).onclick = () => baixarExtrato(linhas.slice().reverse(), r, de, ate, nomePessoa);
+    $$('[data-acerto]', el).forEach((b) => { const [dv, cr, v] = b.dataset.acerto.split('|'); b.onclick = () => formAcerto(dv, cr, n(v), nomeUn); });
+    $$('[data-estornar]', el).forEach((b) => {
+      b.onclick = () => pedirMotivo('Estornar lançamento', 'O lançamento fica no extrato, riscado, e deixa de contar no saldo.', async (motivo) => {
+        await rpc('fin_estornar', { p_id: b.dataset.estornar, p_motivo: motivo }); toast('Lançamento estornado.', 'ok'); recarregar();
+      });
+    });
+    $$('[data-estornar-rateio]', el).forEach((b) => {
+      b.onclick = () => pedirMotivo('Estornar compra conjunta', 'Desfaz a compra conjunta nas duas unidades (lançamentos, empréstimos e o valor a acertar).', async (motivo) => {
+        await rpc('fin_estornar_rateio', { p_id: b.dataset.estornarRateio, p_motivo: motivo }); toast('Compra conjunta estornada.', 'ok'); recarregar();
+      });
+    });
+  }
+
+  function podeEstornarFin(l) {
+    if (['venda', 'rateio'].includes(l.tipo) || l.rateio_id) return false;
+    if (['emprestimo', 'amortizacao', 'acerto_pago', 'acerto_recebido'].includes(l.tipo)) return ehAdmin();
+    return ehGestor();
+  }
+
+  function pedirMotivo(titulo, texto, fn) {
+    const d = abrirModal({ titulo, classe: 'estreito',
+      corpo: `<p class="muted" style="margin-top:0">${esc(texto)}</p><div class="campo"><label>Motivo</label><input type="text" id="m-motivo" placeholder="Ex.: lançado em dobro"></div>`,
+      rodape: `<button class="btn sec" data-fechar>Voltar</button><button class="btn perigo" id="m-ok">Estornar</button>` });
+    d.$('#m-motivo').focus();
+    d.$('#m-ok').onclick = (e) => ocupado(e.currentTarget, async () => {
+      const m = d.$('#m-motivo').value.trim();
+      if (m.length < 3) throw new Error('Informe o motivo do estorno.');
+      await fn(m); d.fechar();
+    });
+  }
+
+  function formLancFin(tipo, r) {
+    const cfg = {
+      despesa: { t: 'Lançar saída', ok: 'Lançar saída', cats: CAT_SAIDA, desc: 'Justificativa', ph: 'Ex.: gás para produção, frete do Mercado Livre…', obrig: true },
+      receita: { t: 'Entrada avulsa', ok: 'Lançar entrada', cats: CAT_ENTRADA, desc: 'Descrição', ph: 'Ex.: fiado da Joana recebido' },
+      emprestimo: { t: 'Pegar empréstimo', ok: 'Registrar empréstimo', cats: null, desc: 'Para quê', ph: 'Ex.: compra do forno' },
+      amortizacao: { t: 'Abater empréstimo', ok: 'Abater', cats: null, desc: 'Observação', ph: 'Opcional' },
+    }[tipo];
+    const d = abrirModal({ titulo: cfg.t, classe: 'estreito',
+      corpo: `
+        ${tipo === 'amortizacao' ? `<div class="aviso small"><span>Em aberto: <b>${brl(r.divida)}</b> · saldo em conta: <b>${brl(r.saldo)}</b></span><button type="button" class="btn sec mini" id="f-tudo">Abater tudo</button></div>` : ''}
+        ${tipo === 'emprestimo' ? '<p class="small muted" style="margin-top:0">O valor entra no saldo da conta e soma no empréstimo em aberto. Você abate quando quiser.</p>' : ''}
+        <div class="linha-campos">
+          <div class="campo"><label>Data</label><input type="date" id="f-data" value="${hoje()}"></div>
+          <div class="campo"><label>Valor (R$)</label><input type="number" id="f-valor" min="0" step="0.01" inputmode="decimal"></div>
+        </div>
+        ${cfg.cats ? `<div class="campo"><label>Categoria</label><select id="f-cat">${cfg.cats.map((c) => `<option>${esc(c)}</option>`).join('')}</select></div>` : ''}
+        <div class="campo"><label>${cfg.desc}${cfg.obrig ? ' <span class="muted">(obrigatória)</span>' : ''}</label><input type="text" id="f-desc" placeholder="${esc(cfg.ph)}"></div>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="f-ok">${cfg.ok}</button>` });
+    const t = d.$('#f-tudo'); if (t) t.onclick = () => { d.$('#f-valor').value = n(r.divida).toFixed(2); };
+    d.$('#f-ok').onclick = (e) => ocupado(e.currentTarget, async () => {
+      const valor = n(d.$('#f-valor').value), descricao = d.$('#f-desc').value.trim();
+      if (valor <= 0) throw new Error('Informe o valor.');
+      if (cfg.obrig && descricao.length < 3) throw new Error('Justifique a saída do dinheiro.');
+      if (['despesa', 'amortizacao'].includes(tipo) && valor > n(r.saldo) + 0.001
+        && !await confirmar(`O saldo da conta é ${brl(r.saldo)}. Com essa saída ele fica em ${brl(n(r.saldo) - valor)}. Lançar mesmo assim?`, { ok: 'Lançar' })) return;
+      await rpc('fin_lancar', { p: { unidade_id: S.un, tipo, valor, data: d.$('#f-data').value, categoria: d.$('#f-cat')?.value || null, descricao } });
+      d.fechar(); toast('Lançamento registrado.', 'ok'); recarregar();
+    });
+  }
+
+  async function formRateio() {
+    const uns = await todasUnidades();
+    if (uns.length < 2) { toast('A compra conjunta precisa de duas unidades.', 'erro'); return; }
+    const pagantes = uns.filter((u) => ehAdmin() || S.unidades.some((x) => x.id === u.id));
+    const d = abrirModal({ titulo: 'Compra conjunta (rateio)', classe: 'largo',
+      corpo: `
+        <p class="muted" style="margin-top:0">Uma compra só, dividida entre as unidades. Quem pagou tem a saída na conta; a outra unidade fica devendo a parte dela até o acerto.</p>
+        <div class="linha-campos">
+          <div class="campo"><label>Data</label><input type="date" id="r-data" value="${hoje()}"></div>
+          <div class="campo" style="grid-column: span 2"><label>Descrição</label><input type="text" id="r-desc" placeholder="Ex.: Atacadão · 24 leites condensados + 48 cremes"></div>
+        </div>
+        <div class="linha-campos">
+          <div class="campo"><label>Categoria</label><select id="r-cat">${CAT_SAIDA.map((c) => `<option>${esc(c)}</option>`).join('')}</select></div>
+          <div class="campo"><label>Valor total (R$)</label><input type="number" id="r-total" min="0" step="0.01" inputmode="decimal"></div>
+          <div class="campo"><label>Quem pagou</label><select id="r-pag">${opcoes(pagantes, S.un, { rot: (u) => 'Conta ' + nomeCurto(u) })}${ehAdmin() ? '<option value="">Dinheiro de fora (vira empréstimo de cada unidade)</option>' : ''}</select></div>
+        </div>
+        <div class="campo"><label>Divisão <button type="button" class="btn sec mini" id="r-igual" style="margin-left:8px">Dividir igual</button></label>
+          <div class="itens-lista">${uns.map((u) => `<div class="item-linha fr3" data-un="${u.id}">
+            <div class="campo"><label>Unidade</label><b style="display:block;padding-top:9px">${esc(nomeCurto(u))}</b></div>
+            <div class="campo"><label>%</label><input type="number" data-pct min="0" max="100" step="0.1" value="${(100 / uns.length).toFixed(1)}"></div>
+            <div class="campo"><label>Valor (R$)</label><input type="number" data-val min="0" step="0.01"></div></div>`).join('')}</div></div>
+        <div class="total-box"><span class="muted" id="r-info"></span><b id="r-soma">${brl(0)}</b></div>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="r-ok">Lançar compra conjunta</button>` });
+    const linhas = () => d.$$('[data-un]');
+    const total = () => n(d.$('#r-total').value);
+    const info = () => {
+      const soma = linhas().reduce((s, l) => s + n(l.querySelector('[data-val]').value), 0);
+      d.$('#r-soma').textContent = brl(soma);
+      const dif = Math.round((total() - soma) * 100) / 100;
+      d.$('#r-info').textContent = !total() ? 'Informe o valor total' : Math.abs(dif) < 0.01 ? 'Divisão fecha com o total ✓' : dif > 0 ? `Faltam ${brl(dif)} para fechar` : `Passou ${brl(-dif)} do total`;
+    };
+    const outra = (l) => linhas().length === 2 ? linhas().find((x) => x !== l) : null;
+    const porPct = () => {
+      const ls = linhas(); let acum = 0;
+      ls.forEach((l, i) => {
+        const v = i === ls.length - 1 ? Math.round((total() - acum) * 100) / 100 : Math.round(total() * n(l.querySelector('[data-pct]').value)) / 100;
+        acum += v; l.querySelector('[data-val]').value = total() ? v.toFixed(2) : '';
+      });
+      info();
+    };
+    d.$('#r-total').oninput = porPct;
+    d.$('#r-igual').onclick = () => { linhas().forEach((l) => { l.querySelector('[data-pct]').value = (100 / linhas().length).toFixed(1); }); porPct(); };
+    linhas().forEach((l) => {
+      l.querySelector('[data-pct]').oninput = () => {
+        const o = outra(l); if (o) o.querySelector('[data-pct]').value = Math.max(0, 100 - n(l.querySelector('[data-pct]').value)).toFixed(1);
+        porPct();
+      };
+      l.querySelector('[data-val]').oninput = () => {
+        const v = n(l.querySelector('[data-val]').value), o = outra(l);
+        if (o && total()) o.querySelector('[data-val]').value = Math.max(0, total() - v).toFixed(2);
+        if (total()) linhas().forEach((x) => { x.querySelector('[data-pct]').value = (n(x.querySelector('[data-val]').value) / total() * 100).toFixed(1); });
+        info();
+      };
+    });
+    info();
+    d.$('#r-ok').onclick = (e) => ocupado(e.currentTarget, async () => {
+      const partes = linhas().map((l) => ({ unidade_id: l.dataset.un, valor: n(l.querySelector('[data-val]').value) })).filter((p) => p.valor > 0);
+      const descricao = d.$('#r-desc').value.trim();
+      if (descricao.length < 3) throw new Error('Descreva a compra conjunta.');
+      if (total() <= 0) throw new Error('Informe o valor total.');
+      await rpc('fin_rateio', { p: { data: d.$('#r-data').value, descricao, categoria: d.$('#r-cat').value, valor_total: total(), pagante_id: d.$('#r-pag').value || null, partes } });
+      d.fechar(); toast('Compra conjunta lançada.', 'ok'); recarregar();
+    });
+  }
+
+  function formAcerto(dev, cred, valor, nomeUn) {
+    const d = abrirModal({ titulo: 'Registrar acerto entre unidades', classe: 'estreito',
+      corpo: `<p class="muted" style="margin-top:0"><b>${esc(nomeUn(dev))}</b> transfere para <b>${esc(nomeUn(cred))}</b>. Sai da conta de uma e entra na conta da outra.</p>
+        <div class="linha-campos">
+          <div class="campo"><label>Data</label><input type="date" id="a-data" value="${hoje()}"></div>
+          <div class="campo"><label>Valor (R$) · pendente ${brl(valor)}</label><input type="number" id="a-valor" min="0" step="0.01" value="${n(valor).toFixed(2)}"></div>
+        </div>
+        <div class="campo"><label>Observação</label><input type="text" id="a-desc" placeholder="Opcional. Ex.: Pix de 05/11"></div>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="a-ok">Registrar acerto</button>` });
+    d.$('#a-ok').onclick = (e) => ocupado(e.currentTarget, async () => {
+      await rpc('fin_acertar', { p: { devedor_id: dev, credor_id: cred, valor: n(d.$('#a-valor').value), data: d.$('#a-data').value, descricao: d.$('#a-desc').value.trim() } });
+      d.fechar(); toast('Acerto registrado.', 'ok'); recarregar();
+    });
+  }
+
+  function baixarExtrato(linhas, r, de, ate, nomePessoa) {
+    const cel = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const num = (v) => n(v).toFixed(2).replace('.', ',');
+    const rows = [['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Saldo', 'Registrado por', 'Situação']];
+    rows.push([dataBR(de), 'Saldo inicial', '', '', '', num(r.saldo_anterior), '', '']);
+    linhas.forEach((l) => rows.push([dataBR(l.data), l.descricao || '', l.categoria || '', (TIPOS_FIN[l.tipo] || [l.tipo])[0], num(l.valor),
+      l.estornado ? '' : num(l.saldo), nomePessoa(l.criado_por), l.estornado ? 'Estornado: ' + (l.estorno_motivo || '') : '']));
+    rows.push([dataBR(ate), 'Saldo final', '', '', '', num(r.saldo_final), '', '']);
+    const csv = '﻿' + rows.map((x) => x.map(cel).join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `extrato-${nomeCurto(unAtual()).toLowerCase().replace(/\s+/g, '-')}-${de}-a-${ate}.csv`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
   // ================================================================== USUÁRIOS
   async function vUsuarios(el) {
     if (!ehAdmin()) { el.innerHTML = '<div class="card vazio">Apenas o administrador gerencia usuários.</div>'; return; }
@@ -1666,7 +1911,7 @@
   }
 
   const VIEWS = { painel: vPainel, vendas: vVendas, reservas: vReservas, producao: vProducao, contagem: vContagem, estoque: vEstoque,
-    entradas: vEntradas, perdas: vPerdas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios };
+    entradas: vEntradas, perdas: vPerdas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios, financeiro: vFinanceiro };
 
   // ------------------------------------------------------------------ início
   window.addEventListener('hashchange', () => { if ($('#conteudo')) renderRota(); });
