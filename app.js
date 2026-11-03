@@ -1388,7 +1388,7 @@
         return `<div class="ficha" data-prod="${p.id}" tabindex="0">
           <div class="cod">${esc(p.codigo)} ${p.ativo ? '' : '<span class="badge cinza">inativo</span>'}</div>
           <h3>${esc(p.nome)}</h3>
-          <div class="linhas"><span class="muted">Linha</span><span><span class="badge ${p.linha === 'Premium' ? 'dourado' : 'rosa'}">${esc(p.linha)}</span></span>
+          <div class="linhas"><span class="muted">Linha</span><span><span class="badge ${p.linha === 'Gourmet' ? 'dourado' : 'rosa'}">${esc(p.linha)}</span></span>
             <span class="muted">Preço</span><b class="num">${brl(p.preco_venda)}</b>
             <span class="muted">Custo do pote</span><span class="num">${brl(c)}</span>
             <span class="muted">Margem</span><span class="num">${brl(n(p.preco_venda) - c)}</span>
@@ -1444,7 +1444,7 @@
         <div class="linha-campos">
           <div class="campo"><label>Código</label><input type="text" id="f-cod" value="${esc(p?.codigo || '')}" ${dis} placeholder="BP-08"></div>
           <div class="campo" style="grid-column: span 2"><label>Nome do sabor</label><input type="text" id="f-nome" value="${esc(p?.nome || '')}" ${dis}></div>
-          <div class="campo"><label>Linha</label><select id="f-linha" ${dis}>${opcoes([{ id: 'Comum', nome: 'Comum' }, { id: 'Premium', nome: 'Premium' }], p?.linha || 'Comum')}</select></div>
+          <div class="campo"><label>Linha</label><select id="f-linha" ${dis}>${opcoes([{ id: 'Comum', nome: 'Comum' }, { id: 'Gourmet', nome: 'Gourmet' }], p?.linha || 'Comum')}</select></div>
           <div class="campo"><label>Preço de venda (R$)</label><input type="number" id="f-preco" min="0" step="0.5" value="${n(p?.preco_venda)}" ${dis}></div>
         </div>
         <h3>Composição de 1 pote (220 ml)</h3>
