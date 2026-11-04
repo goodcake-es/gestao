@@ -79,6 +79,38 @@
     if (u === 'ml') return brl(n(c) * 1000) + '/L';
     return brl(c) + '/' + (u || 'un');
   }
+  // quantidade curta para embalagens: 5 kg, 12,64 kg, 395 g
+  function qtdCurta(v, u) {
+    v = n(v); const t = (x) => fmt(x, Math.abs(x * 100 - Math.round(x * 100)) < 1e-6 && Math.abs(x - Math.round(x)) > 1e-9 ? (Math.abs(x * 10 - Math.round(x * 10)) < 1e-6 ? 1 : 2) : Math.abs(x - Math.round(x)) < 1e-9 ? 0 : 2);
+    if (u === 'g' && Math.abs(v) >= 1000) return t(v / 1000) + ' kg';
+    if (u === 'ml' && Math.abs(v) >= 1000) return t(v / 1000) + ' L';
+    return fmtAuto(v) + ' ' + (UNID[u] || u || '');
+  }
+  // embalagens: "32 caixinhas", "≈ 2,5 latas"
+  const PLURAL = { caixinha: 'caixinhas', lata: 'latas', pacote: 'pacotes', barra: 'barras', bandeja: 'bandejas', pote: 'potes', saco: 'sacos',
+    unidade: 'unidades', garrafa: 'garrafas', caixa: 'caixas', fardo: 'fardos', vidro: 'vidros', galão: 'galões', rolo: 'rolos' };
+  const embNome = (i, q = 2) => {
+    const s = String(i?.embalagem_nome || '').trim() || 'emb.';
+    if (Math.abs(n(q)) <= 1 || s === 'emb.') return s;
+    return PLURAL[s.toLowerCase()] || (/[sx]$/i.test(s) ? s : s + 's');
+  };
+  function embFmt(q, i) {
+    const e = n(i?.embalagem_padrao); if (!i || e <= 1) return '';
+    const k = n(q) / e; if (Math.abs(k) < 0.05) return '';
+    const exato = Math.abs(k - Math.round(k)) < 0.02;
+    return `${exato ? '' : '≈ '}${exato ? fmt(Math.round(k)) : fmt(k, 1)} ${embNome(i, k)}`;
+  }
+  const inicioSemana = (d = hoje()) => addDias(d, -((new Date(d + 'T12:00:00').getDay() + 6) % 7));
+  const diasDesde = (d) => d ? Math.round((new Date(hoje() + 'T12:00:00') - new Date(String(d).slice(0, 10) + 'T12:00:00')) / 864e5) : null;
+  const tempoDesde = (d) => { const k = diasDesde(d); return k === null ? '' : k <= 0 ? 'hoje' : k === 1 ? 'ontem' : `há ${k} dias`; };
+  // validade: vencido / hoje / amanhã / em N dias
+  function badgeValidade(v) {
+    if (!v) return '<span class="muted">—</span>';
+    const k = -diasDesde(v);
+    const cls = k < 0 ? 'vermelho' : k === 0 ? 'vermelho' : k === 1 ? 'dourado' : 'verde';
+    const t = k < 0 ? `venceu ${dataCurta(v)}` : k === 0 ? 'vence hoje' : k === 1 ? 'vence amanhã' : `vence ${dataCurta(v)}`;
+    return `<span class="badge ${cls}">${t}</span>`;
+  }
 
   // ------------------------------------------------------------------ ícones (traço simples)
   const ICONES = {
@@ -102,6 +134,9 @@
     perda: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
     lapis: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
     receita: '<path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3z"/><path d="M5 17a3 3 0 013-3h11"/><path d="M9 8h6"/>',
+    cliente: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
+    relogio: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    alvo: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
     banco: '<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 21h18"/>',
   };
   const ic = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[k] || ''}</svg>`;
@@ -168,7 +203,7 @@
   const insPorId = (id) => S.cat.insumos.find((i) => i.id === id);
   const prepPorId = (id) => S.cat.preparos.find((p) => p.id === id);
   const fornPorId = (id) => S.cat.fornecedores.find((f) => f.id === id);
-  const nomeItem = (m) => m.produto_id ? (prodPorId(m.produto_id)?.nome || '?') : (insPorId(m.insumo_id)?.nome || '?');
+  const nomeItem = (m) => m.produto_id ? (prodPorId(m.produto_id)?.nome || '?') : m.preparo_id ? (prepPorId(m.preparo_id)?.nome || '?') : (insPorId(m.insumo_id)?.nome || '?');
   const resumoItens = (itens) => itens.map((i) => `${fmtAuto(i.quantidade)}× ${esc(prodPorId(i.produto_id)?.nome || '?')}`).join(', ') || '—';
 
   function selInsumoOpcoes(sel) {
@@ -224,7 +259,7 @@
   }
   const TIPOS_MOV = {
     entrada: ['Entrada', 'verde'], producao: ['Produção', 'rosa'], consumo_producao: ['Consumo produção', 'cinza'],
-    venda: ['Venda', 'cacau'], transferencia_saida: ['Transf. enviada', 'dourado'], transferencia_entrada: ['Transf. recebida', 'dourado'],
+    producao_base: ['Base pronta', 'rosa'], venda: ['Venda', 'cacau'], transferencia_saida: ['Transf. enviada', 'dourado'], transferencia_entrada: ['Transf. recebida', 'dourado'],
     ajuste_contagem: ['Ajuste contagem', 'rosa'], perda: ['Perda', 'vermelho'], estorno: ['Estorno', 'cinza'],
   };
   const badgeMov = (t) => `<span class="badge ${(TIPOS_MOV[t] || [])[1] || ''}">${esc((TIPOS_MOV[t] || [t])[0])}</span>`;
@@ -286,6 +321,26 @@
     const o = {}; l.forEach((e) => { o[e.produto_id] = n(e.quantidade); }); return o;
   }
 
+  async function estoquePreparos(un = S.un) {
+    const l = await dados(sb.from('estoque_preparos').select('*').eq('unidade_id', un));
+    const o = {}; l.forEach((e) => { o[e.preparo_id] = { q: n(e.quantidade), c: n(e.custo_medio) }; }); return o;
+  }
+  async function lotesValidade() {
+    try { return (await rpc('lotes_validade', { p_unidade: S.un })) || []; } catch (e) { console.warn(e); return []; }
+  }
+  // validade mais próxima de cada item em estoque ({id: 'aaaa-mm-dd'})
+  function validadeMaisProxima(lotes, tipo) {
+    const o = {};
+    lotes.filter((l) => l.tipo === tipo).forEach((l) => { const v = String(l.validade).slice(0, 10); if (!o[l.item_id] || v < o[l.item_id]) o[l.item_id] = v; });
+    return o;
+  }
+  // porção de uma base por pote (a maior entre os sabores ativos); null para base usada só dentro de outra
+  function porcaoBase(id) {
+    const ativos = new Set(produtosAtivos().map((p) => p.id));
+    const l = S.cat.produtoItens.filter((i) => i.preparo_id === id && ativos.has(i.produto_id)).map((i) => n(i.quantidade));
+    return l.length ? Math.max(...l) : null;
+  }
+
   // custos (mesma regra do banco: custo médio da unidade; sem estoque, último preço de compra)
   function custoInsumo(id) {
     const e = S.estoqueIns[id];
@@ -301,6 +356,42 @@
   }
   const custoItemProduto = (i) => n(i.quantidade) * (i.insumo_id ? custoInsumo(i.insumo_id) : custoPreparoG(i.preparo_id));
   const custoProduto = (id) => S.cat.produtoItens.filter((i) => i.produto_id === id).reduce((s, i) => s + custoItemProduto(i), 0);
+
+  const custoBaseG = (id, estB = {}) => (estB[id]?.q > 0 && estB[id]?.c > 0 ? estB[id].c : custoPreparoG(id));
+  // plano de consumo igual ao do banco: usa a base pronta e faz na hora só o que faltar
+  // prepRec = {id, receitas} para prever a produção de uma base
+  function planoConsumo(prodQtds, estB = {}, prepRec = null) {
+    const ins = {}, bases = {}, resta = {};
+    Object.entries(estB).forEach(([k, v]) => { resta[k] = Math.max(0, n(v.q)); });
+    let fazer = null;
+    const usarPrep = (pid, g, nivel) => {
+      const pr = prepPorId(pid); if (!pr || nivel > 6 || g <= 0) return;
+      const b = bases[pid] = bases[pid] || { precisa: 0, usa: 0, falta: 0, nivel };
+      const usa = Math.min(resta[pid] || 0, g); resta[pid] = (resta[pid] || 0) - usa;
+      b.precisa += g; b.usa += usa; b.falta += g - usa;
+      if (g - usa > 1e-9) fazer(pid, (g - usa) / n(pr.rendimento), nivel);
+    };
+    fazer = (pid, rec, nivel) => {
+      S.cat.preparoItens.filter((i) => i.preparo_id === pid).forEach((i) => {
+        const q = n(i.quantidade) * rec;
+        if (i.insumo_id) ins[i.insumo_id] = (ins[i.insumo_id] || 0) + q; else usarPrep(i.sub_preparo_id, q, nivel + 1);
+      });
+    };
+    if (prepRec) fazer(prepRec.id, prepRec.receitas, 0);
+    Object.entries(prodQtds).forEach(([pid, qtd]) => {
+      S.cat.produtoItens.filter((i) => i.produto_id === pid).forEach((i) => {
+        const q = n(i.quantidade) * qtd;
+        if (i.insumo_id) ins[i.insumo_id] = (ins[i.insumo_id] || 0) + q; else usarPrep(i.preparo_id, q, 1);
+      });
+    });
+    return { ins, bases };
+  }
+  const tabelaInsumosConsumo = (ins) => tabela(['Ingrediente', '#Sai do estoque', '#Em estoque', ''],
+    Object.entries(ins).sort((a, b) => (insPorId(a[0])?.nome || '').localeCompare(insPorId(b[0])?.nome || '')).map(([id, qq]) => {
+      const i = insPorId(id); const est = n(S.estoqueIns[id]?.quantidade);
+      return `<tr><td>${esc(i?.nome)}</td><td class="num">${qtdFmt(qq, i?.unidade)}</td><td class="num">${qtdFmt(est, i?.unidade)}</td>
+        <td>${est < qq - 1e-6 ? '<span class="badge vermelho">insuficiente</span>' : '<span class="badge verde">ok</span>'}</td></tr>`;
+    }), { vazio: 'Nenhum ingrediente sai do estoque.' });
 
   // explode N potes em insumos (para prever o consumo de uma produção)
   function explodir(prodQtds) {
@@ -416,6 +507,7 @@
     { id: 'painel', t: 'Painel', ic: 'home', g: 'Visão geral' },
     { id: 'vendas', t: 'Vendas', ic: 'venda', g: 'Operação' },
     { id: 'reservas', t: 'Reservas', ic: 'reserva', g: 'Operação' },
+    { id: 'clientes', t: 'Clientes', ic: 'cliente', g: 'Operação' },
     { id: 'producao', t: 'Produção', ic: 'producao', g: 'Operação' },
     { id: 'contagem', t: 'Contagem semanal', ic: 'contagem', g: 'Operação' },
     { id: 'receitas', t: 'Receitas', ic: 'receita', g: 'Operação' },
@@ -527,11 +619,15 @@
   async function vPainel(el) {
     S.periodo = S.periodo || { de: inicioMes(), ate: hoje(), preset: 'mes' };
     const { de, ate } = S.periodo;
-    const [p, estIns, reservas, contAberta] = await Promise.all([
+    const [p, estIns, reservas, contAberta, lotes, pSem, p28, fin] = await Promise.all([
       rpc('rpc_painel', { p_unidade: S.un, p_de: de, p_ate: ate }),
       carregarEstoqueIns(),
       dados(sb.from('reservas').select('*').eq('unidade_id', S.un).in('status', ['pendente', 'confirmada']).order('data_entrega').limit(50)),
       dados(sb.from('contagens').select('id,data').eq('unidade_id', S.un).eq('status', 'aberta').limit(1)),
+      lotesValidade(),
+      rpc('rpc_painel', { p_unidade: S.un, p_de: inicioSemana(), p_ate: hoje() }),
+      rpc('rpc_painel', { p_unidade: S.un, p_de: addDias(hoje(), -27), p_ate: hoje() }),
+      ehGestor() ? rpc('fin_resumo', { p_unidade: S.un, p_de: hoje(), p_ate: hoje() }).catch(() => null) : Promise.resolve(null),
     ]);
     const fat = n(p.faturamento), cmvTeo = fat > 0 ? n(p.custo_vendido) / fat : null;
     const uc = p.ultima_contagem;
@@ -539,15 +635,55 @@
     const prox = proximaContagem();
     const ehHojeContagem = prox === hoje();
 
+    // validade: o que vence até amanhã (potes e bases em estoque)
+    const limite = addDias(hoje(), 1);
+    const vencendo = lotes.map((l) => ({ ...l, v: String(l.validade).slice(0, 10) })).filter((l) => l.v <= limite)
+      .sort((a, b) => a.v.localeCompare(b.v));
+    const nomeLote = (l) => l.tipo === 'pote' ? prodPorId(l.item_id)?.nome : prepPorId(l.item_id)?.nome;
+    const qtdLote = (l) => l.tipo === 'pote' ? `${fmtAuto(l.quantidade)} pote(s)` : qtdFmt(l.quantidade, 'g');
+    const vencidos = vencendo.filter((l) => l.v < hoje());
+    const vencemHoje = vencendo.filter((l) => l.v === hoje());
+
+    // metas: semana, empréstimo e custos fixos
+    const metas = (S.cat.config.metas || {})[S.un] || {};
+    const potesSem = n(pSem.potes), meta = n(metas.potes_semana);
+    const margemFichas = (() => { const l = produtosAtivos().map((x) => n(x.preco_venda) - custoProduto(x.id)); return l.length ? l.reduce((a, b) => a + b, 0) / l.length : 0; })();
+    const margem = n(p28.potes) > 0 ? (n(p28.faturamento) - n(p28.custo_vendido)) / n(p28.potes) : margemFichas;
+    const ritmo = n(p28.potes) / 4;
+    const divida = fin ? Math.max(0, n(fin.divida)) : null;
+    const potesQuitar = divida > 0 && margem > 0 ? Math.ceil(divida / margem) : 0;
+    const semanas = potesQuitar && ritmo > 0 ? Math.ceil(potesQuitar / ritmo) : null;
+    const fixos = n(metas.custos_fixos_mes);
+    const minSemana = fixos > 0 && margem > 0 ? Math.ceil(fixos / 4.33 / margem) : null;
+    const pctBarra = (a, b) => (b > 0 ? Math.min(100, a / b * 100) : 0).toFixed(1);
+
     el.innerHTML = cabecalho('Painel', `${esc(unAtual()?.nome)} · ${dataBR(de)} a ${dataBR(ate)}`, '<div id="periodo"></div>') + `
       ${contAberta.length ? `<div class="aviso rosa"><b>Contagem em andamento</b> desde ${dataBR(contAberta[0].data)}. <a href="#/contagem">Continuar contagem →</a></div>`
         : ehHojeContagem ? `<div class="aviso"><b>Hoje é dia de contagem!</b> Conte o estoque pela manhã para calcular o CMV da semana. <a href="#/contagem">Abrir contagem →</a></div>`
         : `<div class="aviso"><span>Próxima contagem semanal: <b>${diaSemana(prox)}, ${dataBR(prox)}</b>, de manhã.</span></div>`}
+      ${vencidos.length || vencemHoje.length ? `<div class="aviso vermelho mt"><span>${ic('relogio')} <b>${vencidos.length ? `${vencidos.length} lote(s) vencido(s)` : ''}${vencidos.length && vencemHoje.length ? ' e ' : ''}${vencemHoje.length ? `${vencemHoje.length} vencendo hoje` : ''}</b>: ${vencendo.filter((l) => l.v <= hoje()).map((l) => `${esc(nomeLote(l))} (${qtdLote(l)})`).join(', ')}. Venda em promoção ou dê saída como perda.</span></div>` : ''}
       <div class="grade k4 mt">
         <div class="kpi"><div class="rotulo">Faturamento</div><div class="valor">${brl(fat)}</div><div class="det">${fmt(p.num_vendas)} vendas</div></div>
         <div class="kpi dourado"><div class="rotulo">Potes vendidos</div><div class="valor">${fmtAuto(p.potes)}</div><div class="det">ticket médio ${brl(p.num_vendas ? fat / p.num_vendas : 0)}</div></div>
         <div class="kpi cacau"><div class="rotulo">CMV teórico</div><div class="valor">${pct(cmvTeo)}</div><div class="det">pelas fichas · meta ${pct(metaCmv(), 0)}</div></div>
         <div class="kpi"><div class="rotulo">CMV real</div><div class="valor">${uc ? pct(uc.cmv_percentual) : '—'}</div><div class="det">${!uc ? 'sem contagem fechada' : uc.cmv_valor == null ? 'a partir da 2ª contagem' : 'contagem de ' + dataBR(uc.data)}</div></div>
+      </div>
+      <div class="grade k2 mt">
+        <div class="card"><div class="card-topo"><h2>Validade</h2><span class="small muted">vence até amanhã</span></div>
+          ${vencendo.length ? `<ul class="lista-simples">${vencendo.slice(0, 8).map((l) => `
+            <li><div class="grow"><b>${esc(nomeLote(l))}</b><div class="small muted">${l.tipo === 'pote' ? 'Pote pronto' : 'Base pronta'} · ${qtdLote(l)}</div></div>${badgeValidade(l.v)}</li>`).join('')}</ul>
+            <div class="acoes mt"><a class="btn sec mini" href="#/perdas">Dar saída de perdas</a></div>`
+            : '<div class="vazio">Nada vencendo hoje ou amanhã.</div>'}</div>
+        <div class="card"><div class="card-topo"><h2>Metas</h2>${ehGestor() ? '<button class="btn sec mini" id="b-metas">Ajustar metas</button>' : ''}</div>
+          <div class="meta-bloco"><div class="meta-linha"><span>Potes vendidos nesta semana</span><b>${fmtAuto(potesSem)}${meta ? ` de ${fmtAuto(meta)}` : ''}</b></div>
+            ${meta ? `<div class="barra-prog"><i style="width:${pctBarra(potesSem, meta)}%"></i></div><div class="small muted">${potesSem >= meta ? 'Meta batida!' : `faltam ${fmtAuto(meta - potesSem)} potes até domingo`}</div>`
+              : `<div class="small muted">${ehGestor() ? 'Defina uma meta semanal em Ajustar metas.' : 'Sem meta semanal definida.'}</div>`}</div>
+          ${divida !== null ? `<div class="meta-bloco"><div class="meta-linha"><span>Empréstimo em aberto</span><b>${brl(divida)}</b></div>
+            ${n(fin.emprestado) > 0 ? `<div class="barra-prog dourado"><i style="width:${pctBarra(n(fin.amortizado), n(fin.emprestado))}%"></i></div>` : ''}
+            <div class="small">${divida > 0 ? `≈ <b>${fmt(potesQuitar)} potes</b> de lucro para quitar (margem média ${brl(margem)} por pote)${semanas ? ` · no ritmo atual (${fmt(ritmo, 1)} potes/semana), cerca de <b>${fmt(semanas)} semana(s)</b>` : ''}.` : '<span class="pos">Sem empréstimo em aberto.</span>'}</div></div>` : ''}
+          <div class="meta-bloco"><div class="meta-linha"><span>Custos fixos</span><b>${fixos ? brl(fixos) + '/mês' : '—'}</b></div>
+            <div class="small muted">${minSemana ? `Para cobrir, venda no mínimo <b>${fmt(minSemana)} potes por semana</b>${ritmo ? ` (ritmo atual: ${fmt(ritmo, 1)})` : ''}.` : 'Cadastre gás, luz, transporte e outros gastos do mês em Ajustar metas para ver o mínimo de vendas.'}</div></div>
+        </div>
       </div>
       <div class="grade k4 mt">
         <div class="kpi dourado"><div class="rotulo">Rendimento</div><div class="valor">${p.rendimento_medio == null ? '—' : fmt(n(p.rendimento_medio) * potesPorReceita(), 1)}</div><div class="det">potes por receita (padrão ${potesPorReceita()}) · ${fmt(p.producoes)} produções</div></div>
@@ -568,6 +704,7 @@
           <li><div class="grow">${esc(c.canal)}<div class="barra-prog"><i style="width:${fat ? (n(c.total) / fat * 100).toFixed(1) : 0}%"></i></div></div><b class="num">${brl(c.total)}</b></li>`).join('')}</ul>` : '<div class="vazio">Sem vendas no período.</div>'}</div>
       </div>`;
     seletorPeriodo($('#periodo', el), (np) => { S.periodo = np; recarregar(); }, S.periodo);
+    const bm = $('#b-metas', el); if (bm) bm.onclick = () => formMetas(metas);
 
     // gráficos (depois de o fragmento entrar na página)
     queueMicrotask(() => setTimeout(() => {
@@ -590,6 +727,22 @@
           scales: { x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#f3e4df' } }, y: { grid: { display: false } } } },
       }));
     }, 0));
+  }
+
+  function formMetas(atual = {}) {
+    const d = abrirModal({
+      titulo: `Metas · ${nomeCurto(unAtual())}`, classe: 'estreito',
+      corpo: `<div class="campo"><label>Meta de potes por semana</label><input type="number" id="m-pot" min="0" step="1" value="${n(atual.potes_semana) || ''}" placeholder="ex.: 30"><span class="ajuda">A semana vai de segunda a domingo.</span></div>
+        <div class="campo"><label>Custos fixos do mês (R$)</label><input type="number" id="m-fix" min="0" step="0.01" value="${n(atual.custos_fixos_mes) || ''}" placeholder="0,00">
+          <span class="ajuda">Gastos que não estão nas fichas: gás, luz, internet, transporte, sacolas, taxas da maquininha…</span></div>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="m-ok">Salvar metas</button>`,
+    });
+    d.$('#m-ok').onclick = (e) => ocupado(e.currentTarget, async () => {
+      const todas = { ...(S.cat.config.metas || {}) };
+      todas[S.un] = { potes_semana: n(d.$('#m-pot').value), custos_fixos_mes: n(d.$('#m-fix').value) };
+      await dados(sb.from('config').upsert({ chave: 'metas', valor: todas }));
+      await carregarCatalogo(); d.fechar(); toast('Metas salvas.', 'ok'); recarregar();
+    });
   }
 
   // ================================================================== VENDAS
@@ -685,6 +838,7 @@
       d.$('#v-alerta').innerHTML = faltam.length ? `<div class="aviso small mt">Estoque do sistema menor que a venda: ${faltam.map(([id]) => esc(prodPorId(id)?.nome)).join(', ')}. A venda será registrada e a diferença aparece na contagem.</div>` : '';
     };
     const ler = saboresUI(d.$('#v-sabores'), { qtds, precos: true, estoque, onChange: atualizar, incluir: Object.keys(qtds), precoDe });
+    sugerirClientes(d.$('#v-cliente'));
     d.$('#v-desc').oninput = atualizar;
     atualizar();
     d.$('#v-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
@@ -792,6 +946,7 @@
       d.$('#r-total').textContent = brl(Object.entries(q).reduce((s, [id, x]) => s + x * n(prodPorId(id)?.preco_venda), 0));
     };
     const ler = saboresUI(d.$('#r-sabores'), { qtds, precos: true, onChange: atualizar });
+    sugerirClientes(d.$('#r-cli'), d.$('#r-tel'));
     atualizar();
     d.$('#r-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
       const q = ler();
@@ -806,19 +961,155 @@
     });
   }
 
+  // ================================================================== CLIENTES
+  const SUMIDO_DIAS = 21;
+  async function carregarClientes() { return (await rpc('clientes_resumo', { p_unidade: S.un })) || []; }
+  const chaveCli = (nome) => String(nome || '').trim().toLowerCase();
+  const ehSumido = (c) => n(c.compras) > 0 && diasDesde(c.ultima) > SUMIDO_DIAS;
+  const ehAniversario = (c) => c.aniversario && String(c.aniversario).slice(5, 7) === hoje().slice(5, 7);
+  function msgCliente(c) {
+    const p = String(c.nome || '').trim().split(/\s+/)[0];
+    const sabores = produtosAtivos().map((x) => x.nome);
+    const lista = sabores.length > 1 ? sabores.slice(0, -1).join(', ') + ' e ' + sabores.slice(-1) : sabores.join('');
+    if (n(c.fiado) > 0) return `Oi, ${p}! Tudo bem? Passando pra lembrar do bolo de pote da Good Cake: ficou ${brl(c.fiado)} em aberto. Quando puder, me manda no Pix. Obrigado!`;
+    if (ehAniversario(c)) return `Oi, ${p}! Feliz aniversário! A Good Cake te deseja um dia muito doce 🎂`;
+    if (ehSumido(c)) return `Oi, ${p}! Tudo bem? Faz tempo que você não pega um bolo de pote da Good Cake 😊 Essa semana tem ${lista}. Quer que eu separe o seu?`;
+    return `Oi, ${p}! Tudo bem?`;
+  }
+  // sugere nomes de clientes já conhecidos num campo (e preenche o telefone, se houver)
+  async function sugerirClientes(input, telInput = null) {
+    try {
+      const l = await carregarClientes();
+      if (!input.isConnected) return;
+      const dl = document.createElement('datalist'); dl.id = 'dl-cli-' + Math.random().toString(36).slice(2, 8);
+      dl.innerHTML = l.map((c) => `<option value="${esc(c.nome)}">${esc(c.telefone || '')}</option>`).join('');
+      input.after(dl); input.setAttribute('list', dl.id); input.setAttribute('autocomplete', 'off');
+      if (telInput) input.addEventListener('change', () => { const c = l.find((x) => x.chave === chaveCli(input.value)); if (c?.telefone && !telInput.value) telInput.value = c.telefone; });
+    } catch (e) { console.warn(e); }
+  }
+
+  async function vClientes(el) {
+    S.abaCli = S.abaCli || 'todos';
+    const lista = await carregarClientes();
+    const filtros = { todos: () => true, fiado: (c) => n(c.fiado) > 0, sumidos: ehSumido, aniversario: ehAniversario };
+    const busca = chaveCli(S.buscaCli);
+    const vis = lista.filter(filtros[S.abaCli] || filtros.todos)
+      .filter((c) => !busca || chaveCli(c.nome).includes(busca) || String(c.telefone || '').replace(/\D/g, '').includes(busca.replace(/\D/g, '') || '§'));
+    const ordem = { fiado: (a, b) => n(b.fiado) - n(a.fiado), sumidos: (a, b) => String(a.ultima).localeCompare(String(b.ultima)),
+      aniversario: (a, b) => String(a.aniversario).slice(8).localeCompare(String(b.aniversario).slice(8)) };
+    vis.sort(ordem[S.abaCli] || ((a, b) => String(b.ultima || '').localeCompare(String(a.ultima || '')) || String(a.nome).localeCompare(String(b.nome), 'pt-BR')));
+    const ativos30 = lista.filter((c) => c.ultima && diasDesde(c.ultima) <= 30).length;
+    const fiadoTot = lista.reduce((s, c) => s + n(c.fiado), 0), fiadoN = lista.filter((c) => n(c.fiado) > 0).length;
+    const sumidos = lista.filter(ehSumido).length, anivs = lista.filter(ehAniversario).length;
+
+    el.innerHTML = cabecalho('Clientes', `${esc(nomeCurto(unAtual()))} · histórico de compras, fiado e quem sumiu`,
+      `<button class="btn" id="b-novo">${ic('mais')} Novo cliente</button>`) + `
+      <div class="grade k4">
+        <div class="kpi"><div class="rotulo">Clientes</div><div class="valor">${fmt(lista.length)}</div><div class="det">${fmt(lista.filter((c) => n(c.compras) > 0).length)} já compraram</div></div>
+        <div class="kpi dourado"><div class="rotulo">Compraram em 30 dias</div><div class="valor">${fmt(ativos30)}</div><div class="det">clientes ativos</div></div>
+        <div class="kpi cacau"><div class="rotulo">Fiado em aberto</div><div class="valor">${brl(fiadoTot)}</div><div class="det">${fmt(fiadoN)} cliente(s)</div></div>
+        <div class="kpi"><div class="rotulo">Sumidos</div><div class="valor">${fmt(sumidos)}</div><div class="det">sem comprar há mais de ${SUMIDO_DIAS} dias</div></div>
+      </div>
+      <div class="abas mt">${[['todos', 'Todos'], ['fiado', `Com fiado${fiadoN ? ` (${fiadoN})` : ''}`], ['sumidos', `Sumidos${sumidos ? ` (${sumidos})` : ''}`], ['aniversario', `Aniversariantes do mês${anivs ? ` (${anivs})` : ''}`]]
+        .map(([k, t]) => `<button data-aba="${k}" class="${S.abaCli === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
+      <div class="card"><div class="card-topo"><input type="search" id="f-busca-cli" placeholder="Buscar por nome ou telefone…" value="${esc(S.buscaCli || '')}" style="max-width:280px"><span class="small muted">${fmt(vis.length)} cliente(s)</span></div>
+        ${tabela(['Cliente', '#Compras', '#Potes', '#Total gasto', 'Última compra', '#Fiado', ''], vis.map((c) => `<tr class="clicavel" data-cli="${esc(c.chave)}">
+          <td><b>${esc(c.nome)}</b>${ehAniversario(c) ? ` <span class="badge rosa">aniversário ${dataCurta(c.aniversario)}</span>` : ''}${c.telefone ? `<div class="small muted">${esc(c.telefone)}</div>` : ''}</td>
+          <td class="num">${fmt(c.compras)}</td><td class="num">${fmtAuto(c.potes)}</td><td class="num">${brl(c.total)}</td>
+          <td>${c.ultima ? `${dataCurta(c.ultima)} <span class="small muted">· ${tempoDesde(c.ultima)}</span>${ehSumido(c) ? ' <span class="badge dourado">sumido</span>' : ''}` : '<span class="muted">sem compras</span>'}</td>
+          <td class="num">${n(c.fiado) > 0 ? `<b class="neg">${brl(c.fiado)}</b>` : '—'}</td>
+          <td>${c.telefone ? `<a class="btn sec mini" data-wa href="${esc(wa(c.telefone, msgCliente(c)))}" target="_blank" rel="noopener">${ic('whats')} WhatsApp</a>` : ''}</td></tr>`),
+          { vazio: S.abaCli === 'todos' ? 'Nenhum cliente ainda. Eles aparecem aqui quando você registra uma venda com o nome do cliente.' : 'Ninguém nesta lista.' })}
+        <p class="small muted" style="margin-bottom:0">As compras são juntadas pelo nome digitado na venda. Use sempre o mesmo nome (a venda sugere os nomes já cadastrados).</p></div>`;
+    $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaCli = b.dataset.aba; recarregar(); }; });
+    $('#b-novo', el).onclick = () => formCliente();
+    $$('[data-cli]', el).forEach((tr) => { tr.onclick = (e) => { if (e.target.closest('[data-wa]')) return; formCliente(lista.find((c) => c.chave === tr.dataset.cli)); }; });
+    const fb = $('#f-busca-cli', el);
+    let t; fb.oninput = () => { clearTimeout(t); t = setTimeout(() => { S.buscaCli = fb.value; recarregar().then(() => { const x = $('#f-busca-cli'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } }); }, 300); };
+  }
+
+  async function formCliente(c = null) {
+    let vendas = [], itens = [];
+    if (c && n(c.compras) > 0) {
+      try {
+        vendas = (await dados(sb.from('vendas').select('*').eq('unidade_id', S.un).eq('status', 'ativa').order('data', { ascending: false }).limit(1000)))
+          .filter((v) => chaveCli(v.cliente) === c.chave);
+        itens = vendas.length ? await dados(sb.from('venda_itens').select('*').in('venda_id', vendas.map((v) => v.id))) : [];
+      } catch (e) { falha(e); }
+    }
+    const porVenda = {}; itens.forEach((i) => { (porVenda[i.venda_id] = porVenda[i.venda_id] || []).push(i); });
+    const temVendas = vendas.length > 0;
+    const d = abrirModal({
+      titulo: c ? c.nome : 'Novo cliente', classe: 'largo',
+      corpo: `${c && n(c.compras) ? `<div class="grade k4">
+          <div class="kpi"><div class="rotulo">Compras</div><div class="valor">${fmt(c.compras)}</div><div class="det">desde ${dataBR(c.primeira)}</div></div>
+          <div class="kpi dourado"><div class="rotulo">Potes</div><div class="valor">${fmtAuto(c.potes)}</div><div class="det">ticket médio ${brl(n(c.total) / n(c.compras))}</div></div>
+          <div class="kpi cacau"><div class="rotulo">Total gasto</div><div class="valor">${brl(c.total)}</div><div class="det">última ${tempoDesde(c.ultima)}</div></div>
+          <div class="kpi"><div class="rotulo">Fiado em aberto</div><div class="valor ${n(c.fiado) > 0 ? 'neg' : ''}">${brl(c.fiado)}</div><div class="det">${fmt(c.fiados)} venda(s)</div></div></div>` : ''}
+        <div class="linha-campos mt">
+          <div class="campo" style="grid-column: span 2"><label>Nome</label><input type="text" id="c-nome" value="${esc(c?.nome || '')}" ${temVendas ? 'readonly title="O nome liga o cliente às vendas"' : ''}></div>
+          <div class="campo"><label>WhatsApp</label><input type="tel" id="c-tel" value="${esc(c?.telefone || '')}" placeholder="(27) 99999-9999"></div>
+          <div class="campo"><label>Aniversário</label><input type="date" id="c-aniv" value="${c?.aniversario ? String(c.aniversario).slice(0, 10) : ''}"></div>
+        </div>
+        <div class="campo"><label>Observação</label><input type="text" id="c-obs" value="${esc(c?.obs || '')}" placeholder="Ex.: prefere ChocoNinho, trabalha no 3º andar"></div>
+        ${temVendas ? `<h3 class="sub-h mt">Histórico de compras</h3>${tabela(['Data', 'Sabores', 'Pagamento', '#Total'], vendas.map((v) => `<tr><td>${dataBR(v.data)}</td>
+          <td class="small">${resumoItens(porVenda[v.id] || [])}</td><td>${esc(v.pagamento || '—')}${v.pagamento === 'Fiado' ? ' <span class="badge vermelho">a receber</span>' : ''}</td><td class="num">${brl(v.total)}</td></tr>`))}
+          ${n(c.fiado) > 0 ? '<p class="small muted">Para dar baixa no fiado, use o botão <b>Receber</b> na tela de Vendas.</p>' : ''}` : ''}`,
+      rodape: `${c?.cliente_id && ehGestor() && !temVendas ? '<button class="btn perigo esq" id="c-excluir">Excluir</button>' : ''}
+        ${c?.telefone ? `<a class="btn sec" href="${esc(wa(c.telefone, msgCliente(c)))}" target="_blank" rel="noopener">${ic('whats')} WhatsApp</a>` : ''}
+        <button class="btn sec" data-fechar>Fechar</button><button class="btn" id="c-salvar">Salvar</button>`,
+    });
+    d.$('#c-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
+      const reg = { nome: d.$('#c-nome').value.trim(), telefone: d.$('#c-tel').value.trim() || null, aniversario: d.$('#c-aniv').value || null, obs: d.$('#c-obs').value.trim() || null };
+      if (!reg.nome) throw new Error('Informe o nome do cliente.');
+      if (c?.cliente_id) await dados(sb.from('clientes').update(reg).eq('id', c.cliente_id));
+      else await dados(sb.from('clientes').insert({ ...reg, unidade_id: S.un }));
+      d.fechar(); toast('Cliente salvo.', 'ok'); recarregar();
+    });
+    const bx = d.$('#c-excluir');
+    if (bx) bx.onclick = async () => {
+      if (!await confirmar(`Excluir o cadastro de ${esc(c.nome)}?`, { ok: 'Excluir', perigo: true })) return;
+      try { await dados(sb.from('clientes').delete().eq('id', c.cliente_id)); d.fechar(); toast('Cadastro excluído.'); recarregar(); } catch (er) { falha(er); }
+    };
+  }
+
   // ================================================================== PRODUÇÃO
   async function vProducao(el) {
-    const prods = await dados(sb.from('producoes').select('*').eq('unidade_id', S.un).order('data', { ascending: false }).order('criado_em', { ascending: false }).limit(200));
+    S.abaProd = S.abaProd || 'potes';
+    const [prods, estB, lotes, pbs] = await Promise.all([
+      dados(sb.from('producoes').select('*').eq('unidade_id', S.un).order('data', { ascending: false }).order('criado_em', { ascending: false }).limit(200)),
+      estoquePreparos(), lotesValidade(),
+      dados(sb.from('producoes_base').select('*').eq('unidade_id', S.un).order('data', { ascending: false }).order('criado_em', { ascending: false }).limit(200)),
+    ]);
     const itens = prods.length ? await dados(sb.from('producao_itens').select('*').in('producao_id', prods.map((p) => p.id))) : [];
     const porProd = {}; itens.forEach((i) => { (porProd[i.producao_id] = porProd[i.producao_id] || []).push(i); });
     const ult30 = prods.filter((p) => p.data >= addDias(hoje(), -29));
     const esp = ult30.reduce((s, p) => s + n(p.potes_esperados), 0), feitos = ult30.reduce((s, p) => s + n(p.potes_produzidos), 0);
     const rec = ult30.reduce((s, p) => s + n(p.receitas), 0);
     const pr = potesPorReceita();
+    const valB = validadeMaisProxima(lotes, 'base');
 
-    el.innerHTML = cabecalho('Produção', `${esc(nomeCurto(unAtual()))} · 1 receita = 1 massa = <b>${pr} potes de 220 ml</b> (o recheio rende ${potesRecheio()})`,
-      `<button class="btn" id="b-nova">${ic('mais')} Registrar produção</button>`) + `
-      <div class="grade k4">
+    // bases prontas agora
+    const cards = S.cat.preparos.filter((x) => x.ativo).map((x) => {
+      const q = estB[x.id]?.q || 0, porc = porcaoBase(x.id);
+      return `<button type="button" class="base-card ${q > 0 ? 'tem' : ''}" data-base="${x.id}">
+        <span class="cod">${esc(x.codigo)}</span><b>${esc(x.nome)}</b>
+        <span class="base-q">${q > 0 ? qtdFmt(q, 'g') : 'sem estoque'}</span>
+        <span class="small muted">${q > 0 && porc ? `≈ ${fmt(Math.floor(q / porc + 0.05))} potes` : porc ? `${fmtAuto(porc)} g por pote` : 'vai dentro de outra base'}</span>
+        ${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : ''}</button>`;
+    }).join('');
+
+    let corpo;
+    if (S.abaProd === 'bases') {
+      corpo = `<div class="card">${tabela(['Data', 'Base', '#Receitas', '#Esperado', '#Pesado', 'Rendimento', 'Validade', '#Custo', ''],
+        pbs.map((b) => `<tr class="${b.status === 'estornada' ? 'riscado' : ''}"><td>${dataBR(b.data)}</td><td><b>${esc(prepPorId(b.preparo_id)?.nome || '?')}</b>${b.obs ? `<div class="small muted">${esc(b.obs)}</div>` : ''}</td>
+          <td class="num">${fmtAuto(Math.round(n(b.receitas) * 100) / 100)}</td><td class="num">${qtdFmt(b.peso_esperado, 'g')}</td><td class="num"><b>${qtdFmt(b.peso, 'g')}</b></td>
+          <td>${badgeRend(n(b.peso_esperado) ? n(b.peso) / n(b.peso_esperado) : null)}</td><td>${b.validade ? dataCurta(b.validade) : '—'}</td><td class="num">${brl(b.custo_total)}</td>
+          <td>${b.status === 'ativa' ? `<button class="btn perigo mini" data-estornar-base="${b.id}">Estornar</button>` : badgeStatus(b.status)}</td></tr>`),
+        { vazio: 'Nenhuma base lançada ainda. Use “Produzir base” quando fizer massa, creme ou geleia.' })}
+        <p class="small muted">Rendimento = peso pesado ÷ rendimento da ficha. Estornar devolve os ingredientes e tira a base do estoque.</p></div>`;
+    } else {
+      corpo = `<div class="grade k4">
         <div class="kpi"><div class="rotulo">Receitas (30 dias)</div><div class="valor">${fmtAuto(rec)}</div><div class="det">${fmt(ult30.length)} produções</div></div>
         <div class="kpi dourado"><div class="rotulo">Potes produzidos</div><div class="valor">${fmtAuto(feitos)}</div><div class="det">esperado ${fmtAuto(esp)}</div></div>
         <div class="kpi cacau"><div class="rotulo">Potes por receita</div><div class="valor">${rec ? fmt(feitos / rec, 1) : '—'}</div><div class="det">padrão ${pr}</div></div>
@@ -829,37 +1120,117 @@
           <td class="num"><b>${fmtAuto(p.potes_produzidos)}</b></td><td>${badgeRend(p.rendimento)}</td>
           <td class="small">${resumoItens(porProd[p.id] || [])}</td><td class="small muted">${esc(p.obs || '')}</td></tr>`),
         { vazio: 'Nenhuma produção registrada.' })}</div>`;
+    }
+
+    el.innerHTML = cabecalho('Produção', `${esc(nomeCurto(unAtual()))} · 1 receita de massa = <b>${pr} potes</b> · bases prontas ficam no estoque em gramas`,
+      `<button class="btn sec" id="b-base">${ic('receita')} Produzir base</button><button class="btn" id="b-nova">${ic('mais')} Montar potes</button>`) + `
+      <h2 class="secao">Bases prontas agora</h2>
+      <div class="bases-strip">${cards}</div>
+      <div class="abas mt">${[['potes', 'Potes montados'], ['bases', 'Bases produzidas']].map(([k, t]) => `<button data-aba="${k}" class="${S.abaProd === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
+      ${corpo}`;
+    $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaProd = b.dataset.aba; recarregar(); }; });
     $('#b-nova', el).onclick = () => formProducao();
+    $('#b-base', el).onclick = () => formBase();
+    $$('[data-base]', el).forEach((b) => { b.onclick = () => formBase(b.dataset.base); });
+    $$('[data-estornar-base]', el).forEach((b) => {
+      b.onclick = async () => {
+        if (!await confirmar('Estornar esta base? Os ingredientes voltam para o estoque e a base sai do estoque.', { ok: 'Estornar', perigo: true })) return;
+        try { await rpc('rpc_estornar_base', { p_id: b.dataset.estornarBase }); await carregarEstoqueIns(); toast('Base estornada.', 'ok'); recarregar(); } catch (e) { falha(e); }
+      };
+    });
   }
 
-  function formProducao() {
-    const pr = potesPorReceita();
+  // PRODUZIR BASE: massa, creme, geleia… vira estoque em gramas, com o peso real
+  async function formBase(prepId = null) {
+    let estB = {};
+    try { [estB] = await Promise.all([estoquePreparos(), carregarEstoqueIns()]); } catch (e) { falha(e); }
+    const preps = S.cat.preparos.filter((x) => x.ativo);
     const d = abrirModal({
-      titulo: 'Registrar produção', classe: 'largo',
+      titulo: 'Produzir base', classe: 'largo',
+      corpo: `
+        <div class="linha-campos">
+          <div class="campo" style="grid-column: span 2"><label>Base</label><select id="b-prep">${opcoes(preps.map((x) => ({ id: x.id, nome: `${x.codigo} · ${x.nome}` })), prepId || preps[0]?.id)}</select></div>
+          <div class="campo"><label>Data</label><input type="date" id="b-data" value="${hoje()}"></div>
+        </div>
+        <div class="linha-campos">
+          <div class="campo"><label>Receitas feitas</label><input type="number" id="b-rec" min="0.05" step="0.25" value="1"><span class="ajuda" id="b-rec-aj"></span></div>
+          <div class="campo"><label>Peso final pesado (g)</label><input type="number" id="b-peso" min="1" step="1" inputmode="numeric"><span class="ajuda" id="b-peso-aj"></span></div>
+          <div class="campo"><label>Validade</label><input type="date" id="b-val"><span class="ajuda" id="b-val-aj"></span></div>
+        </div>
+        <div class="campo"><label>Observação</label><input type="text" id="b-obs" placeholder="Opcional. Ex.: sobra da produção de ontem"></div>
+        <div class="total-box"><span id="b-resumo" class="muted"></span><b id="b-rend">—</b></div>
+        <div id="b-sub"></div>
+        <details class="mt"><summary class="small" style="cursor:pointer">Ingredientes que saem do estoque</summary><div id="b-consumo" class="mt"></div></details>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="b-salvar">Lançar base pronta</button>`,
+    });
+    let valManual = false;
+    const atualizar = (resetVal = false) => {
+      const x = prepPorId(d.$('#b-prep').value); if (!x) return;
+      const rec = n(d.$('#b-rec').value), esp = n(x.rendimento) * rec;
+      const vd = n(x.validade_dias) || 3;
+      d.$('#b-rec-aj').textContent = `1 receita rende ${qtdFmt(x.rendimento, 'g')}`;
+      d.$('#b-peso').placeholder = fmtAuto(Math.round(esp));
+      d.$('#b-peso-aj').textContent = `esperado ${qtdFmt(esp, 'g')} · deixe vazio se não pesou`;
+      if (resetVal || !valManual) { d.$('#b-val').value = addDias(d.$('#b-data').value || hoje(), vd); valManual = false; }
+      d.$('#b-val-aj').textContent = `${vd} dia(s) na geladeira`;
+      const peso = n(d.$('#b-peso').value) || esp, porc = porcaoBase(x.id);
+      d.$('#b-resumo').innerHTML = `${qtdFmt(peso, 'g')} de ${esc(x.nome)}${porc ? ` · dá ≈ <b>${fmt(Math.floor(peso / porc + 0.05))} potes</b> (${fmtAuto(porc)} g por pote)` : ''}`;
+      d.$('#b-rend').innerHTML = n(d.$('#b-peso').value) && esp ? badgeRend(peso / esp) : '—';
+      const plano = planoConsumo({}, estB, { id: x.id, receitas: rec });
+      const subs = Object.entries(plano.bases);
+      d.$('#b-sub').innerHTML = subs.length ? `<div class="aviso mt small"><span>${subs.map(([id, b]) => `<b>${esc(prepPorId(id)?.nome)}</b>: ${b.usa > 0 ? `usa ${qtdFmt(b.usa, 'g')} já pronto` : ''}${b.usa > 0 && b.falta > 0 ? ' + ' : ''}${b.falta > 0 ? `${qtdFmt(b.falta, 'g')} feito agora junto` : ''}`).join(' · ')}</span></div>` : '';
+      d.$('#b-consumo').innerHTML = tabelaInsumosConsumo(plano.ins);
+    };
+    d.$('#b-prep').onchange = () => atualizar(true);
+    d.$('#b-data').onchange = () => atualizar(true);
+    d.$('#b-val').onchange = () => { valManual = true; };
+    d.$('#b-rec').oninput = () => atualizar(); d.$('#b-peso').oninput = () => atualizar();
+    atualizar(true);
+    d.$('#b-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
+      const x = prepPorId(d.$('#b-prep').value);
+      if (!x) throw new Error('Escolha a base.');
+      if (n(d.$('#b-rec').value) <= 0) throw new Error('Informe quantas receitas foram feitas.');
+      await rpc('rpc_produzir_base', { p: { unidade_id: S.un, data: d.$('#b-data').value, preparo_id: x.id, receitas: n(d.$('#b-rec').value),
+        peso: n(d.$('#b-peso').value) || null, validade: d.$('#b-val').value || null, obs: d.$('#b-obs').value.trim() } });
+      await carregarEstoqueIns();
+      const peso = n(d.$('#b-peso').value) || n(x.rendimento) * n(d.$('#b-rec').value);
+      d.fechar(); toast(`Base lançada: ${qtdFmt(peso, 'g')} de ${x.nome}.`, 'ok'); recarregar();
+    });
+  }
+
+  // MONTAR POTES: usa as bases prontas; o que faltar sai dos ingredientes (feito na hora)
+  async function formProducao() {
+    const pr = potesPorReceita();
+    let estB = {};
+    try { [estB] = await Promise.all([estoquePreparos(), carregarEstoqueIns()]); } catch (e) { falha(e); }
+    const d = abrirModal({
+      titulo: 'Montar potes', classe: 'largo',
       corpo: `
         <div class="linha-campos">
           <div class="campo"><label>Data</label><input type="date" id="p-data" value="${hoje()}"></div>
-          <div class="campo"><label>Receitas feitas</label><input type="number" id="p-rec" min="0.5" step="0.5" value="1"><span class="ajuda">1 receita = 1 massa + 1 recheio base</span></div>
+          <div class="campo"><label>Receitas de massa</label><input type="number" id="p-rec" min="0.5" step="0.5" value="1"><span class="ajuda">para medir o rendimento (1 receita = ${pr} potes)</span></div>
           <div class="campo"><label>Validade dos potes</label><input type="date" id="p-val" value="${addDias(hoje(), 3)}"><span class="ajuda">padrão: 3 dias</span></div>
         </div>
         <div class="campo"><label>Potes montados por sabor</label><div id="p-sabores"></div></div>
         <div class="campo"><label>Observação</label><input type="text" id="p-obs" placeholder="Ex.: creme ficou mole, massa assou demais…"></div>
         <div class="total-box"><span id="p-resumo"></span><b id="p-rend">—</b></div>
-        <details class="mt"><summary class="small" style="cursor:pointer">Ver consumo de insumos pela ficha técnica</summary><div id="p-consumo" class="mt"></div></details>`,
-      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="p-salvar">Registrar produção</button>`,
+        <div id="p-bases" class="mt"></div>
+        <details class="mt"><summary class="small" style="cursor:pointer">Ingredientes que saem do estoque</summary><div id="p-consumo" class="mt"></div></details>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="p-salvar">Registrar potes</button>`,
     });
     const atualizar = () => {
       const q = ler(); const potes = Object.values(q).reduce((s, x) => s + x, 0);
       const esp = n(d.$('#p-rec').value) * pr;
       d.$('#p-resumo').innerHTML = `Esperado <b>${fmtAuto(esp)}</b> · produzido <b>${fmtAuto(potes)}</b> potes`;
       d.$('#p-rend').innerHTML = esp ? badgeRend(potes / esp) : '—';
-      const cons = explodir(q);
-      const linhas = Object.entries(cons).sort((a, b) => (insPorId(a[0])?.nome || '').localeCompare(insPorId(b[0])?.nome || '')).map(([id, qq]) => {
-        const i = insPorId(id); const est = n(S.estoqueIns[id]?.quantidade);
-        return `<tr><td>${esc(i?.nome)}</td><td class="num">${qtdFmt(qq, i?.unidade)}</td><td class="num">${qtdFmt(est, i?.unidade)}</td>
-          <td>${est < qq - 1e-6 ? '<span class="badge vermelho">insuficiente</span>' : '<span class="badge verde">ok</span>'}</td></tr>`;
-      });
-      d.$('#p-consumo').innerHTML = tabela(['Insumo', '#Consumo', '#Em estoque', ''], linhas, { vazio: 'Escolha os sabores.' });
+      const plano = planoConsumo(q, estB);
+      const bases = Object.entries(plano.bases).filter(([, b]) => b.nivel === 1);
+      const falta = bases.some(([, b]) => b.falta > 0.5);
+      d.$('#p-bases').innerHTML = bases.length ? `<h3 class="sub-h">Bases usadas</h3>${tabela(['Base', '#Precisa', '#Pronta no estoque', 'Situação'],
+        bases.map(([id, b]) => `<tr><td>${esc(prepPorId(id)?.nome)}</td><td class="num">${qtdFmt(b.precisa, 'g')}</td><td class="num">${qtdFmt(estB[id]?.q || 0, 'g')}</td>
+          <td>${b.falta > 0.5 ? `<span class="badge dourado">${qtdFmt(b.falta, 'g')} feito agora</span>` : '<span class="badge verde">sai das bases prontas</span>'}</td></tr>`))}
+        ${falta ? '<p class="small muted" style="margin:6px 0 0">O que falta é tratado como feito agora (baixa os ingredientes). Se você fez uma receita inteira, lance antes em <b>Produzir base</b> com o peso real: assim a sobra fica no estoque.</p>' : ''}` : '';
+      d.$('#p-consumo').innerHTML = tabelaInsumosConsumo(plano.ins);
     };
     const ler = saboresUI(d.$('#p-sabores'), { onChange: atualizar });
     d.$('#p-rec').oninput = atualizar;
@@ -873,7 +1244,7 @@
         itens: Object.entries(q).map(([produto_id, quantidade]) => ({ produto_id, quantidade, validade: val })),
       } });
       await carregarEstoqueIns();
-      d.fechar(); toast('Produção registrada! Insumos baixados pela ficha técnica.', 'ok'); recarregar();
+      d.fechar(); toast('Potes registrados! Bases e ingredientes baixados.', 'ok'); recarregar();
     });
   }
 
@@ -883,7 +1254,9 @@
     const [estP, estI] = await Promise.all([estoqueProdutos(), carregarEstoqueIns()]);
     let corpo = '';
     if (S.abaEst === 'potes') {
-      const res = await dados(sb.from('reservas').select('id').eq('unidade_id', S.un).in('status', ['pendente', 'confirmada']));
+      const [res, lotes] = await Promise.all([
+        dados(sb.from('reservas').select('id').eq('unidade_id', S.un).in('status', ['pendente', 'confirmada'])), lotesValidade()]);
+      const valP = validadeMaisProxima(lotes, 'pote');
       const ri = res.length ? await dados(sb.from('reserva_itens').select('*').in('reserva_id', res.map((r) => r.id))) : [];
       const reservado = {}; ri.forEach((i) => { reservado[i.produto_id] = (reservado[i.produto_id] || 0) + n(i.quantidade); });
       let totQ = 0, totV = 0;
@@ -892,10 +1265,27 @@
         return `<tr><td><span class="ponto ${esc(p.linha)}"></span> <b>${esc(p.nome)}</b> <span class="small muted">${esc(p.codigo)}</span></td>
           <td class="num"><b>${fmtAuto(q)}</b></td><td class="num">${r ? fmtAuto(r) : '—'}</td>
           <td class="num">${q - r < 0 ? `<span class="badge vermelho">${fmtAuto(q - r)}</span>` : fmtAuto(q - r)}</td>
+          <td>${q > 0 && valP[p.id] ? badgeValidade(valP[p.id]) : '<span class="muted">—</span>'}</td>
           <td class="num">${brl(c)}</td><td class="num">${brl(Math.max(q, 0) * c)}</td></tr>`;
       });
-      corpo = `<div class="card">${tabela(['Sabor', '#Em estoque', '#Reservado', '#Disponível', '#Custo/pote', '#Valor'], linhas,
-        { rodape: `<tr><td>Total</td><td class="num">${fmtAuto(totQ)}</td><td colspan="3"></td><td class="num">${brl(totV)}</td></tr>` })}</div>`;
+      corpo = `<div class="card">${tabela(['Sabor', '#Em estoque', '#Reservado', '#Disponível', 'Validade', '#Custo/pote', '#Valor'], linhas,
+        { rodape: `<tr><td>Total</td><td class="num">${fmtAuto(totQ)}</td><td colspan="4"></td><td class="num">${brl(totV)}</td></tr>` })}
+        <p class="small muted" style="margin-bottom:0">Validade do lote mais antigo em estoque (o que sai primeiro).</p></div>`;
+    } else if (S.abaEst === 'bases') {
+      const [estB, lotes] = await Promise.all([estoquePreparos(), lotesValidade()]);
+      const valB = validadeMaisProxima(lotes, 'base');
+      let totV = 0;
+      const linhas = S.cat.preparos.filter((x) => x.ativo).map((x) => {
+        const q = estB[x.id]?.q || 0, c = custoBaseG(x.id, estB), porc = porcaoBase(x.id); totV += Math.max(q, 0) * c;
+        return `<tr><td><b>${esc(x.nome)}</b> <span class="small muted">${esc(x.codigo)}</span></td><td class="num"><b>${qtdFmt(q, 'g')}</b></td>
+          <td class="num">${q > 0 && porc ? '≈ ' + fmt(Math.floor(q / porc + 0.05)) : '—'}</td>
+          <td>${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : '<span class="muted">—</span>'}</td>
+          <td class="num">${custoUnFmt(c, 'g')}</td><td class="num">${brl(Math.max(q, 0) * c)}</td></tr>`;
+      });
+      corpo = `<div class="card"><div class="card-topo"><h2>Bases prontas</h2><button class="btn sec mini" id="b-prod-base">${ic('receita')} Produzir base</button></div>
+        ${tabela(['Base', '#Em estoque', '#Potes', 'Validade', '#Custo', '#Valor'], linhas,
+          { rodape: `<tr><td colspan="5">Valor em bases</td><td class="num">${brl(totV)}</td></tr>` })}
+        <p class="small muted" style="margin-bottom:0">Ao montar potes, o sistema usa primeiro o que está aqui. Sobra que for descartada: <b>Dar saída de perdas</b> → Base pronta.</p></div>`;
     } else if (S.abaEst === 'insumos') {
       const busca = (S.buscaIns || '').toLowerCase(), cat = S.catIns || '';
       let totV = 0;
@@ -903,7 +1293,8 @@
       const linhas = lista.map((i) => {
         const e = S.estoqueIns[i.id] || {}; const q = n(e.quantidade); const c = custoInsumo(i.id); totV += Math.max(q, 0) * c;
         const st = q < 0 ? '<span class="badge vermelho">negativo</span>' : (n(i.estoque_minimo) > 0 && q < n(i.estoque_minimo)) ? '<span class="badge dourado">baixo</span>' : '<span class="badge verde">ok</span>';
-        return `<tr><td><b>${esc(i.nome)}</b><div class="small muted">${esc(i.categoria)}</div></td><td class="num"><b>${qtdFmt(q, i.unidade)}</b></td>
+        const em = embFmt(q, i);
+        return `<tr><td><b>${esc(i.nome)}</b><div class="small muted">${esc(i.categoria)}</div></td><td class="num"><b>${qtdFmt(q, i.unidade)}</b>${em ? `<div class="small muted">${em}</div>` : ''}</td>
           <td class="num">${n(i.estoque_minimo) ? qtdFmt(i.estoque_minimo, i.unidade) : '—'}</td><td class="num">${custoUnFmt(c, i.unidade)}</td>
           <td class="num">${brl(Math.max(q, 0) * c)}</td><td>${st}</td></tr>`;
       });
@@ -920,7 +1311,7 @@
       const linhas = movs.map((m) => {
         const i = m.insumo_id ? insPorId(m.insumo_id) : null;
         return `<tr><td>${dataCurta(m.data)}</td><td>${badgeMov(m.tipo)}</td><td>${esc(nomeItem(m))}</td>
-          <td class="num ${n(m.quantidade) < 0 ? '' : ''}">${n(m.quantidade) > 0 ? '+' : ''}${i ? qtdFmt(m.quantidade, i.unidade) : fmtAuto(m.quantidade) + ' pote(s)'}</td>
+          <td class="num">${n(m.quantidade) > 0 ? '+' : ''}${i ? qtdFmt(m.quantidade, i.unidade) : m.preparo_id ? qtdFmt(m.quantidade, 'g') : fmtAuto(m.quantidade) + ' pote(s)'}</td>
           <td class="num">${brl(m.valor)}</td><td class="small muted">${esc(m.obs || '')}</td></tr>`;
       });
       corpo = `<div class="card"><div class="card-topo"><div class="filtros"><select id="f-tipo"><option value="">Todos os movimentos</option>
@@ -930,10 +1321,11 @@
     }
     el.innerHTML = cabecalho('Estoque', `${esc(nomeCurto(unAtual()))} · saldo atualizado a cada movimento`,
       `<button class="btn sec" id="b-perda">${ic('perda')} Dar saída de perdas</button><a class="btn" href="#/entradas">${ic('entrada')} Nova entrada</a>`) + `
-      <div class="abas">${[['potes', 'Potes prontos'], ['insumos', 'Ingredientes e embalagens'], ['extrato', 'Extrato']].map(([k, t]) => `<button data-aba="${k}" class="${S.abaEst === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
+      <div class="abas">${[['potes', 'Potes prontos'], ['bases', 'Bases prontas'], ['insumos', 'Ingredientes e embalagens'], ['extrato', 'Extrato']].map(([k, t]) => `<button data-aba="${k}" class="${S.abaEst === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
       ${corpo}`;
     $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaEst = b.dataset.aba; recarregar(); }; });
     $('#b-perda', el).onclick = () => formPerda();
+    const bpb = $('#b-prod-base', el); if (bpb) bpb.onclick = () => formBase();
     const fb = $('#f-busca', el);
     if (fb) {
       let t; fb.oninput = () => { clearTimeout(t); t = setTimeout(() => { S.buscaIns = fb.value; recarregar().then(() => { const x = $('#f-busca'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } }); }, 300); };
@@ -976,8 +1368,8 @@
           movs.map((m) => {
             const i = m.insumo_id ? insPorId(m.insumo_id) : null;
             const det = (m.obs || '').split(' · ').slice(1).join(' · ');
-            return `<tr><td>${dataCurta(m.data)}</td><td><b>${esc(nomeItem(m))}</b><div class="small muted">${i ? esc(i.categoria) : 'Pote pronto'}</div></td>
-              <td class="num">${i ? qtdFmt(-n(m.quantidade), i.unidade) : fmtAuto(-n(m.quantidade)) + ' pote(s)'}</td>
+            return `<tr><td>${dataCurta(m.data)}</td><td><b>${esc(nomeItem(m))}</b><div class="small muted">${i ? esc(i.categoria) : m.preparo_id ? 'Base pronta' : 'Pote pronto'}</div></td>
+              <td class="num">${i ? qtdFmt(-n(m.quantidade), i.unidade) : m.preparo_id ? qtdFmt(-n(m.quantidade), 'g') : fmtAuto(-n(m.quantidade)) + ' pote(s)'}</td>
               <td><span class="badge">${esc(motivoDe(m))}</span>${det ? `<div class="small muted">${esc(det)}</div>` : ''}</td>
               <td class="num">${brl(-n(m.valor))}</td><td class="small muted">${esc(nomePessoa(m.criado_por))}</td></tr>`;
           }), { vazio: 'Nenhuma perda no período.', rodape: movs.length ? `<tr><td colspan="4">Total</td><td class="num">${brl(total)}</td><td></td></tr>` : '' })}</div>
@@ -991,8 +1383,8 @@
   }
 
   async function formPerda() {
-    let estP = {};
-    try { estP = await estoqueProdutos(); } catch (e) { falha(e); }
+    let estP = {}, estB = {};
+    try { [estP, estB] = await Promise.all([estoqueProdutos(), estoquePreparos()]); } catch (e) { falha(e); }
     const d = abrirModal({
       titulo: 'Dar saída de perdas', classe: 'largo',
       corpo: `
@@ -1008,7 +1400,7 @@
     const custoLinha = (l) => {
       const t = l.querySelector('[data-t]').value, id = l.querySelector('[data-i]').value, q = n(l.querySelector('[data-q]').value);
       if (!id) return 0;
-      return q * (t === 'produto' ? custoProduto(id) : custoInsumo(id));
+      return q * (t === 'produto' ? custoProduto(id) : t === 'base' ? custoBaseG(id, estB) : custoInsumo(id));
     };
     const total = () => {
       const ls = d.$$('.item-linha');
@@ -1017,7 +1409,7 @@
     };
     const addLinha = () => {
       const l = document.createElement('div'); l.className = 'item-linha f5';
-      l.innerHTML = `<div class="campo"><label>Tipo</label><select data-t><option value="produto">Pote pronto</option><option value="insumo">Ingrediente / embalagem</option></select></div>
+      l.innerHTML = `<div class="campo"><label>Tipo</label><select data-t><option value="produto">Pote pronto</option><option value="base">Base pronta (massa, creme…)</option><option value="insumo">Ingrediente / embalagem</option></select></div>
         <div class="campo"><label>Item</label><select data-i></select></div>
         <div class="campo"><label>Quantidade <span data-u class="muted"></span></label><input type="number" data-q min="0" step="any" value="1"></div>
         <div class="campo"><label>Motivo</label><select data-m>${MOTIVOS_PERDA.map((m) => `<option>${m}</option>`).join('')}</select></div>
@@ -1025,12 +1417,18 @@
       d.$('#l-itens').appendChild(l);
       const t = l.querySelector('[data-t]'), i = l.querySelector('[data-i]');
       const un = () => {
-        const x = t.value === 'produto' ? null : insPorId(i.value);
+        const x = t.value === 'insumo' ? insPorId(i.value) : null;
         l.querySelector('[data-u]').textContent = t.value === 'produto' ? `(potes · tem ${fmtAuto(estP[i.value] || 0)})`
+          : t.value === 'base' ? `(g · tem ${qtdFmt(estB[i.value]?.q || 0, 'g')})`
           : x ? `(${x.unidade} · tem ${qtdFmt(S.estoqueIns[x.id]?.quantidade || 0, x.unidade)})` : '';
         total();
       };
-      const fill = () => { i.innerHTML = t.value === 'produto' ? opcoes(produtosAtivos(), null) : selInsumoOpcoes(); un(); };
+      const fill = () => {
+        i.innerHTML = t.value === 'produto' ? opcoes(produtosAtivos(), null)
+          : t.value === 'base' ? opcoes(S.cat.preparos.filter((x) => x.ativo).sort((a, b) => (estB[b.id]?.q || 0) - (estB[a.id]?.q || 0)), null) : selInsumoOpcoes();
+        const q = l.querySelector('[data-q]'); if (t.value === 'base' && i.value) q.value = Math.max(0, Math.round((estB[i.value]?.q || 0) * 10) / 10) || 1;
+        un();
+      };
       t.onchange = fill; i.onchange = un; l.querySelector('[data-q]').oninput = total;
       l.querySelector('[data-rm]').onclick = () => { l.remove(); total(); };
       fill();
@@ -1043,7 +1441,7 @@
       const obs = d.$('#l-obs').value.trim();
       for (const x of itens) {
         await rpc('rpc_registrar_perda', { p: { unidade_id: S.un, data: d.$('#l-data').value, quantidade: x.q,
-          [x.t === 'produto' ? 'produto_id' : 'insumo_id']: x.id, obs: [x.m, obs].filter(Boolean).join(' · ') } });
+          [x.t === 'produto' ? 'produto_id' : x.t === 'base' ? 'preparo_id' : 'insumo_id']: x.id, obs: [x.m, obs].filter(Boolean).join(' · ') } });
       }
       await carregarEstoqueIns();
       d.fechar(); toast(itens.length > 1 ? `${itens.length} perdas registradas.` : 'Perda registrada.', 'ok'); recarregar();
@@ -1075,14 +1473,15 @@
       const d = abrirModal({
         titulo: `Entrada de ${dataBR(ent.data)}`, classe: 'largo',
         corpo: `<p class="muted" style="margin-top:0">${esc(fornPorId(ent.fornecedor_id)?.nome || 'Sem fornecedor')} · ${esc(ent.documento || 'sem documento')} ${badgeStatus(ent.status)}</p>
-          ${tabela(['Insumo', '#Quantidade', '#Custo', '#Valor pago', 'Validade'], movs.map((m) => {
+          ${tabela(['Insumo', 'Comprado', '#Quantidade', '#Custo', '#Valor pago', 'Validade'], movs.map((m) => {
             const i = insPorId(m.insumo_id);
             const det = m.obs && m.obs !== ent.documento ? `<div class="small muted">${esc(m.obs)}</div>` : '';
-            return `<tr><td>${esc(i?.nome)}${det}</td><td class="num">${qtdFmt(m.quantidade, i?.unidade)}</td><td class="num">${custoUnFmt(m.custo_unitario, i?.unidade)}</td>
+            const comprado = n(m.embalagens) > 0 ? `${fmtAuto(m.embalagens)} ${esc(embNome(i, m.embalagens))} de ${qtdCurta(m.emb_conteudo, i?.unidade)}${n(m.valor) > 0 ? `<div class="small muted">${brl(n(m.valor) / n(m.embalagens))} por ${esc(embNome(i, 1))}</div>` : ''}` : '<span class="muted">—</span>';
+            return `<tr><td>${esc(i?.nome)}${det}</td><td>${comprado}</td><td class="num">${qtdFmt(m.quantidade, i?.unidade)}</td><td class="num">${custoUnFmt(m.custo_unitario, i?.unidade)}</td>
               <td class="num">${n(m.valor) === 0 ? '<span class="badge verde">bonificado</span>' : brl(m.valor)}</td><td>${m.validade ? dataBR(m.validade) : '—'}</td></tr>`;
-          }), { rodape: `${desc > 0 ? `<tr><td colspan="3">Valor bruto</td><td class="num">${brl(bruto)}</td><td></td></tr>
-              <tr><td colspan="3">Descontos</td><td class="num neg">− ${brl(desc)}</td><td></td></tr>` : ''}
-            <tr><td colspan="3">Total pago</td><td class="num">${brl(ent.valor_total)}</td><td></td></tr>` })}
+          }), { rodape: `${desc > 0 ? `<tr><td colspan="4">Valor bruto</td><td class="num">${brl(bruto)}</td><td></td></tr>
+              <tr><td colspan="4">Descontos</td><td class="num neg">− ${brl(desc)}</td><td></td></tr>` : ''}
+            <tr><td colspan="4">Total pago</td><td class="num">${brl(ent.valor_total)}</td><td></td></tr>` })}
           ${ent.obs ? `<p class="small muted">${esc(ent.obs)}</p>` : ''}`,
         rodape: `${ehGestor() && ent.status === 'ativa' ? '<button class="btn perigo esq" id="e-estornar">Estornar entrada</button>' : ''}<button class="btn sec" data-fechar>Fechar</button>`,
       });
@@ -1122,8 +1521,9 @@
     });
     const lista = d.$('#e-itens');
     const r2 = (v) => Math.round(v * 100) / 100;
+    const fatorCu = (l) => (['kg', 'L'].includes(l.querySelector('[data-cu]').value) ? 1000 : 1);
     const ler = (l) => ({
-      ins: insPorId(l.querySelector('[data-i]').value), emb: n(l.querySelector('[data-e]').value), cont: n(l.querySelector('[data-c]').value),
+      ins: insPorId(l.querySelector('[data-i]').value), emb: n(l.querySelector('[data-e]').value), cont: n(l.querySelector('[data-c]').value) * fatorCu(l),
       preco: n(l.querySelector('[data-p]').value), bon: n(l.querySelector('[data-b]').value), desc: n(l.querySelector('[data-d]').value),
     });
     const brutoLinha = (x) => r2(x.emb * x.preco);
@@ -1147,10 +1547,11 @@
       const c = calc();
       c.ls.forEach((x) => {
         const u = x.ins?.unidade || '';
-        x.l.querySelector('[data-u]').textContent = u ? `(${u})` : '';
+        x.l.querySelector('[data-en]').textContent = embNome(x.ins, 2);
+        x.l.querySelectorAll('[data-en1]').forEach((e) => { e.textContent = embNome(x.ins, 1); });
         if (document.activeElement !== x.l.querySelector('[data-t]')) x.l.querySelector('[data-t]').value = x.emb || x.preco ? (brutoLinha(x) - Math.min(x.desc, brutoLinha(x))).toFixed(2) : '';
         const partes = [];
-        if (x.ins && x.qtd > 0) partes.push(`${qtdFmt(x.qtd, u)} no estoque`);
+        if (x.ins && x.qtd > 0) partes.push(`${fmtAuto(x.emb + x.bon)} ${embNome(x.ins, x.emb + x.bon)} de ${qtdCurta(x.cont, u)} = ${qtdCurta(x.qtd, u)} no estoque`);
         if (x.bon > 0) partes.push(`${fmtAuto(x.bon)} emb. bonificada(s)`);
         if (x.desc > 0 || x.descNota > 0) partes.push(`desconto ${brl(Math.min(x.desc, brutoLinha(x)) + x.descNota)}`);
         if (x.ins && x.qtd > 0) partes.push(`custo real ${custoUnFmt(x.valor / x.qtd, u)}`);
@@ -1169,9 +1570,9 @@
       l.className = 'item-linha ent';
       l.innerHTML = `
         <div class="campo"><label>Insumo</label><select data-i>${selInsumoOpcoes()}</select></div>
-        <div class="campo"><label>Emb. pagas</label><input type="number" data-e min="0" step="any" value="1"></div>
-        <div class="campo"><label>Conteúdo <span data-u class="muted"></span></label><input type="number" data-c min="0" step="any"></div>
-        <div class="campo"><label>Preço por emb. (R$)</label><input type="number" data-p min="0" step="0.01" inputmode="decimal"></div>
+        <div class="campo"><label>Qtd. de <span data-en>emb.</span></label><input type="number" data-e min="0" step="any" value="1"></div>
+        <div class="campo"><label>Cada <span data-en1>emb.</span> tem</label><div class="cont-un"><input type="number" data-c min="0" step="any"><select data-cu aria-label="Unidade"><option>g</option></select></div></div>
+        <div class="campo"><label>Preço por <span data-en1>emb.</span> (R$)</label><input type="number" data-p min="0" step="0.01" inputmode="decimal"></div>
         <div class="campo"><label>Total do item (R$)</label><input type="number" data-t min="0" step="0.01" inputmode="decimal"></div>
         <div class="campo"><label>Validade</label><input type="date" data-val></div>
         <div><button type="button" class="icone-btn" data-rm title="Remover">${ic('lixo')}</button></div>
@@ -1184,11 +1585,19 @@
       lista.appendChild(l);
       const sel = l.querySelector('[data-i]'), emb = l.querySelector('[data-e]'), cont = l.querySelector('[data-c]'),
         preco = l.querySelector('[data-p]'), tot = l.querySelector('[data-t]'), bon = l.querySelector('[data-b]'), desc = l.querySelector('[data-d]');
+      const cu = l.querySelector('[data-cu]');
       sel.onchange = () => {
         const i = insPorId(sel.value);
-        if (i) { cont.value = n(i.embalagem_padrao) || 1; if (!preco.value) preco.value = (n(i.custo_referencia) * (n(i.embalagem_padrao) || 1)).toFixed(2); }
+        if (i) {
+          const u = i.unidade, e = n(i.embalagem_padrao) || 1, grande = u !== 'un' && e >= 1000 && e % 100 === 0;
+          cu.innerHTML = u === 'g' ? '<option>g</option><option>kg</option>' : u === 'ml' ? '<option>ml</option><option>L</option>' : '<option>un</option>';
+          cu.value = grande ? (u === 'g' ? 'kg' : 'L') : u;
+          cont.value = grande ? e / 1000 : e;
+          if (!preco.value) preco.value = (n(i.custo_referencia) * e).toFixed(2);
+        }
         atualizar();
       };
+      cu.onchange = atualizar;
       [emb, cont, preco, bon, desc].forEach((x) => { x.oninput = atualizar; });
       d.$('#e-desc-nota').oninput = atualizar;
       // digitou o total do item: calcula o preço por embalagem
@@ -1203,14 +1612,15 @@
       const c = calc();
       const ls = c.ls.filter((x) => x.ins);
       if (!ls.length) throw new Error('Adicione ao menos um item.');
-      if (ls.some((x) => x.qtd <= 0)) throw new Error('Confira as quantidades (embalagens pagas ou bonificadas e o conteúdo).');
+      if (ls.some((x) => x.qtd <= 0)) throw new Error('Confira as quantidades (quantas embalagens e quanto tem em cada uma).');
       if (ls.some((x) => x.emb > 0 && x.preco <= 0)) throw new Error('Informe o preço das embalagens pagas (ou lance como bonificadas).');
       const itens = ls.map((x) => {
         const obs = [];
         if (x.bon > 0) obs.push(`${fmtAuto(x.emb)} paga(s) + ${fmtAuto(x.bon)} bonificada(s)`);
         if (x.desc > 0 || x.descNota > 0) obs.push(`desconto ${brl(Math.min(x.desc, brutoLinha(x)) + x.descNota)}`);
         if (obs.length) obs.unshift(`${brl(x.preco)}/emb.`);
-        return { insumo_id: x.ins.id, quantidade: x.qtd, valor_total: x.valor, validade: x.l.querySelector('[data-val]').value || null, obs: obs.join(' · ') || null };
+        return { insumo_id: x.ins.id, quantidade: x.qtd, valor_total: x.valor, validade: x.l.querySelector('[data-val]').value || null, obs: obs.join(' · ') || null,
+          embalagens: x.emb + x.bon, conteudo: x.cont };
       });
       await rpc('rpc_registrar_entrada', { p: { unidade_id: S.un, data: d.$('#e-data').value, fornecedor_id: d.$('#e-forn').value || null,
         documento: d.$('#e-doc').value.trim(), obs: d.$('#e-obs').value.trim(), valor_bruto: c.bruto, itens } });
@@ -1294,6 +1704,7 @@
       const itens = await dados(sb.from('contagem_itens').select('*').eq('contagem_id', aberta.id));
       const grupos = [
         ['Potes prontos', itens.filter((i) => i.produto_id)],
+        ['Bases prontas (g)', itens.filter((i) => i.preparo_id)],
         ['Ingredientes', itens.filter((i) => i.insumo_id && insPorId(i.insumo_id)?.categoria === 'Ingrediente')],
         ['Embalagens', itens.filter((i) => i.insumo_id && insPorId(i.insumo_id)?.categoria === 'Embalagem')],
         ['Outros', itens.filter((i) => i.insumo_id && insPorId(i.insumo_id)?.categoria === 'Outros')],
@@ -1301,18 +1712,19 @@
       grupos.forEach((g) => g[1].sort((a, b) => nomeItem(a).localeCompare(nomeItem(b), 'pt-BR')));
       const feitos = itens.filter((i) => i.quantidade_contada !== null).length;
       const linha = (i) => {
-        const x = i.insumo_id ? insPorId(i.insumo_id) : null; const u = x ? x.unidade : 'potes';
+        const x = i.insumo_id ? insPorId(i.insumo_id) : null; const base = !!i.preparo_id; const u = x ? x.unidade : base ? 'g' : 'potes';
+        const fq = (v) => (x || base ? qtdFmt(v, u) : fmtAuto(v));
         const dif = i.quantidade_contada === null ? null : n(i.quantidade_contada) - n(i.quantidade_sistema);
         return `<div class="contagem-item ${i.quantidade_contada !== null ? 'feito' : ''}" data-id="${i.id}">
-          <div><b>${esc(nomeItem(i))}</b><div class="small muted">${u}${x?.embalagem_padrao ? ` · emb. ${qtdFmt(x.embalagem_padrao, x.unidade)}` : ''}</div></div>
-          <div class="sis small muted num">sistema: ${x ? qtdFmt(i.quantidade_sistema, u) : fmtAuto(i.quantidade_sistema)}</div>
+          <div><b>${esc(nomeItem(i))}</b><div class="small muted">${u}${n(x?.embalagem_padrao) > 1 ? ` · 1 ${esc(embNome(x, 1))} = ${qtdCurta(x.embalagem_padrao, x.unidade)}` : ''}</div></div>
+          <div class="sis small muted num">sistema: ${fq(i.quantidade_sistema)}${x && embFmt(i.quantidade_sistema, x) ? ` (${embFmt(i.quantidade_sistema, x)})` : ''}</div>
           <input type="number" min="0" step="any" inputmode="decimal" placeholder="contado" value="${i.quantidade_contada ?? ''}" aria-label="${esc(nomeItem(i))}">
-          <div class="dif small num">${dif === null ? '' : dif === 0 ? '<span class="badge verde">ok</span>' : `<span class="badge ${dif < 0 ? 'vermelho' : 'dourado'}">${dif > 0 ? '+' : ''}${x ? qtdFmt(dif, u) : fmtAuto(dif)}</span>`}</div></div>`;
+          <div class="dif small num">${dif === null ? '' : dif === 0 ? '<span class="badge verde">ok</span>' : `<span class="badge ${dif < 0 ? 'vermelho' : 'dourado'}">${dif > 0 ? '+' : ''}${fq(dif)}</span>`}</div></div>`;
       };
       corpo = `<div class="card">
           <div class="card-topo"><h2>Contagem de ${dataBR(aberta.data)}</h2><span class="small muted" id="c-prog">${feitos} de ${itens.length} contados</span></div>
           <div class="barra-prog dourado"><i id="c-barra" style="width:${itens.length ? feitos / itens.length * 100 : 0}%"></i></div>
-          <p class="small muted">Conte o que existe fisicamente e digite na unidade indicada (g, ml, un ou potes). Salva sozinho. Itens deixados em branco ficam com a quantidade do sistema.</p>
+          <p class="small muted">Conte o que existe fisicamente e digite na unidade indicada (g, ml, un ou potes). Bases prontas (massa, cremes): pese e digite em gramas, descontando o pote. Salva sozinho. Itens deixados em branco ficam com a quantidade do sistema.</p>
           ${grupos.map(([t, l]) => `<div class="contagem-grupo"><h3>${t}</h3>${l.map(linha).join('')}</div>`).join('')}
           <div class="acoes mt" style="justify-content:flex-end">
             ${ehGestor() ? '<button class="btn perigo" id="c-excluir">Descartar contagem</button>' : ''}
@@ -1401,7 +1813,7 @@
             <div class="kpi cacau"><div class="rotulo">CMV %</div><div class="valor">${pct(c.cmv_percentual)}</div></div></div>
           <h3 class="mt">Diferenças encontradas</h3>
           ${tabela(['Item', '#Sistema', '#Contado', '#Diferença', '#Valor'], difs.map((i) => {
-            const x = i.insumo_id ? insPorId(i.insumo_id) : null; const f = (v) => x ? qtdFmt(v, x.unidade) : fmtAuto(v);
+            const x = i.insumo_id ? insPorId(i.insumo_id) : null; const f = (v) => x ? qtdFmt(v, x.unidade) : i.preparo_id ? qtdFmt(v, 'g') : fmtAuto(v);
             const dif = n(i.quantidade_contada) - n(i.quantidade_sistema);
             return `<tr><td>${esc(nomeItem(i))}</td><td class="num">${f(i.quantidade_sistema)}</td><td class="num">${f(i.quantidade_contada)}</td>
               <td class="num"><span class="badge ${dif < 0 ? 'vermelho' : 'dourado'}">${dif > 0 ? '+' : ''}${f(dif)}</span></td><td class="num">${brl(dif * n(i.custo_unitario))}</td></tr>`;
@@ -1814,7 +2226,11 @@
           <div class="campo"><label>Preço da embalagem (R$)</label><input type="number" id="i-preco" min="0" step="0.01" value="${i && n(i.embalagem_padrao) ? (n(i.custo_referencia) * n(i.embalagem_padrao)).toFixed(2) : ''}"><span class="ajuda" id="i-custo"></span></div>
           <div class="campo"><label>Estoque mínimo <span class="muted" data-u></span></label><input type="number" id="i-min" min="0" step="any" value="${n(i?.estoque_minimo)}"></div>
         </div>
-        <div class="campo"><label>Marca / especificação indicada</label><input type="text" id="i-marca" value="${esc(i?.marca_indicada || '')}"></div>
+        <div class="linha-campos">
+          <div class="campo"><label>Tipo de embalagem</label><input type="text" id="i-embn" list="dl-embs" value="${esc(i?.embalagem_nome || '')}" placeholder="caixinha, lata, pacote…">
+            <datalist id="dl-embs">${['caixinha', 'lata', 'pacote', 'saco', 'barra', 'bandeja', 'pote', 'garrafa', 'caixa', 'unidade'].map((x) => `<option value="${x}">`).join('')}</datalist></div>
+          <div class="campo" style="grid-column: span 2"><label>Marca / especificação indicada</label><input type="text" id="i-marca" value="${esc(i?.marca_indicada || '')}"></div>
+        </div>
         <label class="check"><input type="checkbox" id="i-ativo" ${i?.ativo === false ? '' : 'checked'}> Ativo</label>
         <p class="small muted">O preço é atualizado sozinho a cada entrada. Ele serve de referência para as fichas técnicas enquanto não há estoque na unidade.</p>`,
       rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="i-salvar">Salvar</button>`,
@@ -1828,7 +2244,7 @@
     d.$('#i-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
       const emb = n(d.$('#i-emb').value), pr = n(d.$('#i-preco').value);
       const reg = { nome: d.$('#i-nome').value.trim(), categoria: d.$('#i-cat').value, unidade: d.$('#i-un').value,
-        embalagem_padrao: emb || null, estoque_minimo: n(d.$('#i-min').value), marca_indicada: d.$('#i-marca').value.trim() || null,
+        embalagem_padrao: emb || null, embalagem_nome: d.$('#i-embn').value.trim().toLowerCase() || null, estoque_minimo: n(d.$('#i-min').value), marca_indicada: d.$('#i-marca').value.trim() || null,
         ativo: d.$('#i-ativo').checked };
       if (emb && pr) reg.custo_referencia = pr / emb;
       if (!reg.nome) throw new Error('Informe o nome.');
@@ -2145,7 +2561,7 @@
   }
 
   const VIEWS = { painel: vPainel, vendas: vVendas, reservas: vReservas, producao: vProducao, contagem: vContagem, estoque: vEstoque,
-    entradas: vEntradas, perdas: vPerdas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios, financeiro: vFinanceiro, receitas: vReceitas };
+    entradas: vEntradas, perdas: vPerdas, transferencias: vTransferencias, fichas: vFichas, cadastros: vCadastros, usuarios: vUsuarios, financeiro: vFinanceiro, receitas: vReceitas, clientes: vClientes };
 
   // ------------------------------------------------------------------ início
   window.addEventListener('hashchange', () => { if ($('#conteudo')) renderRota(); });
