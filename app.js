@@ -180,12 +180,13 @@
   }
 
   // seletor de sabores com +/−
-  function saboresUI(el, { qtds = {}, precos = false, estoque = null, onChange = null } = {}) {
-    const prods = produtosAtivos();
+  function saboresUI(el, { qtds = {}, precos = false, estoque = null, onChange = null, incluir = [], precoDe = null } = {}) {
+    const prods = produtosAtivos().slice();
+    incluir.forEach((id) => { const p = prodPorId(id); if (p && !prods.some((x) => x.id === id)) prods.push(p); });
     el.innerHTML = `<div class="sabores">${prods.map((p) => `
       <div class="sabor" data-id="${p.id}">
         <div class="sabor-nome"><span class="ponto ${esc(p.linha)}"></span><b>${esc(p.nome)}</b></div>
-        <div class="sabor-base"><span class="sabor-meta">${esc(p.linha)}${precos ? ' · ' + brl(p.preco_venda) : ''}${estoque ? ' · tem ' + fmtAuto(estoque[p.id] || 0) : ''}</span>
+        <div class="sabor-base"><span class="sabor-meta">${esc(p.linha)}${precos ? ' · ' + brl(precoDe ? precoDe(p.id) : p.preco_venda) : ''}${estoque ? ' · tem ' + fmtAuto(estoque[p.id] || 0) : ''}</span>
         <div class="stepper"><button type="button" data-d="-1" aria-label="menos">−</button>
           <input type="number" min="0" step="1" inputmode="numeric" value="${qtds[p.id] || 0}" aria-label="${esc(p.nome)}">
           <button type="button" data-d="1" aria-label="mais">+</button></div></div>
@@ -616,10 +617,11 @@
           <td class="small">${resumoItens(porVenda[v.id] || [])}</td><td>${esc(v.canal || '—')}</td><td>${esc(v.pagamento || '—')}${v.status === 'ativa' && v.pagamento === 'Fiado' ? ' <span class="badge vermelho">a receber</span>' : ''}${v.recebido_em ? `<div class="small muted">recebido ${dataCurta(v.recebido_em)}</div>` : ''}</td>
           <td class="num">${brl(v.total)}${n(v.desconto) ? `<div class="small muted">desc. ${brl(v.desconto)}</div>` : ''}</td>
           <td>${badgeStatus(v.status)}</td>
-          <td><div style="display:flex;gap:6px;justify-content:flex-end">${v.status === 'ativa' && v.pagamento === 'Fiado' ? `<button class="btn mini" data-receber="${v.id}">Receber</button>` : ''}${v.status === 'ativa' ? `<button class="btn perigo mini" data-cancelar="${v.id}">Cancelar</button>` : ''}</div></td></tr>`),
+          <td><div style="display:flex;gap:6px;justify-content:flex-end">${v.status === 'ativa' && v.pagamento === 'Fiado' ? `<button class="btn mini" data-receber="${v.id}">Receber</button>` : ''}${v.status === 'ativa' ? `<button class="btn sec mini" data-editar="${v.id}">Editar</button>` : ''}${v.status === 'ativa' ? `<button class="btn perigo mini" data-cancelar="${v.id}">Cancelar</button>` : ''}</div></td></tr>`),
         { vazio: 'Nenhuma venda no período.', rodape: vendas.length ? `<tr><td colspan="5">Total (vendas ativas)</td><td class="num">${brl(tot)}</td><td colspan="2"></td></tr>` : '' })}</div>`;
     seletorPeriodo($('#periodo', el), (np) => { S.pVendas = np; recarregar(); }, S.pVendas);
     $('#b-nova', el).onclick = () => formVenda();
+    $$('[data-editar]', el).forEach((b) => { b.onclick = () => formVenda({ venda: vendas.find((v) => v.id === b.dataset.editar), itensVenda: porVenda[b.dataset.editar] || [] }); });
     $$('[data-receber]', el).forEach((b) => { b.onclick = () => formReceberFiado(vendas.find((v) => v.id === b.dataset.receber)); });
     $$('[data-cancelar]', el).forEach((b) => {
       b.onclick = async () => {
@@ -645,43 +647,57 @@
     });
   }
 
-  async function formVenda({ reserva = null, itensReserva = [] } = {}) {
+  async function formVenda({ reserva = null, itensReserva = [], venda = null, itensVenda = [] } = {}) {
     let estoque = {};
     try { estoque = await estoqueProdutos(); } catch (e) { falha(e); }
-    const qtds = {}; itensReserva.forEach((i) => { qtds[i.produto_id] = n(i.quantidade); });
+    const qtds = {}; (venda ? itensVenda : itensReserva).forEach((i) => { qtds[i.produto_id] = (qtds[i.produto_id] || 0) + n(i.quantidade); });
+    // na edição, os potes desta venda voltam ao estoque disponível e o preço cobrado é mantido
+    if (venda) Object.entries(qtds).forEach(([id, q]) => { estoque[id] = (estoque[id] || 0) + q; });
+    const precoOrig = {}; itensVenda.forEach((i) => { precoOrig[i.produto_id] = n(i.preco_unitario); });
+    const precoDe = (id) => (id in precoOrig ? precoOrig[id] : n(prodPorId(id)?.preco_venda));
+    const obsPadrao = venda ? (venda.obs || '') : (reserva && n(reserva.sinal) ? `Sinal de ${brl(reserva.sinal)} recebido na reserva` : '');
     const d = abrirModal({
-      titulo: reserva ? `Entregar reserva · ${reserva.cliente}` : 'Nova venda', classe: 'largo',
+      titulo: venda ? `Editar venda · ${dataBR(venda.data)}` : reserva ? `Entregar reserva · ${reserva.cliente}` : 'Nova venda', classe: 'largo',
       corpo: `
         <div class="linha-campos">
-          <div class="campo"><label>Data</label><input type="date" id="v-data" value="${hoje()}"></div>
-          <div class="campo"><label>Cliente</label><input type="text" id="v-cliente" value="${esc(reserva?.cliente || '')}" placeholder="Opcional"></div>
-          <div class="campo"><label>Canal</label><select id="v-canal">${opcoes(CANAIS.map((c) => ({ id: c, nome: c })), reserva ? 'WhatsApp' : 'Trabalho')}</select></div>
-          <div class="campo"><label>Pagamento</label><select id="v-pag">${opcoes(PAGAMENTOS.map((c) => ({ id: c, nome: c })), 'Pix')}</select></div>
+          <div class="campo"><label>Data</label><input type="date" id="v-data" value="${venda ? venda.data : hoje()}"></div>
+          <div class="campo"><label>Cliente</label><input type="text" id="v-cliente" value="${esc((venda ? venda.cliente : reserva?.cliente) || '')}" placeholder="Opcional"></div>
+          <div class="campo"><label>Canal</label><select id="v-canal">${opcoes(CANAIS.concat(venda?.canal && !CANAIS.includes(venda.canal) ? [venda.canal] : []).map((c) => ({ id: c, nome: c })), venda ? venda.canal : reserva ? 'WhatsApp' : 'Trabalho')}</select></div>
+          <div class="campo"><label>Pagamento</label><select id="v-pag">${opcoes(PAGAMENTOS.concat(venda?.pagamento && !PAGAMENTOS.includes(venda.pagamento) ? [venda.pagamento] : []).map((c) => ({ id: c, nome: c })), venda ? venda.pagamento : 'Pix')}</select></div>
         </div>
         <div class="campo"><label>Sabores</label><div id="v-sabores"></div></div>
         <div class="linha-campos">
-          <div class="campo"><label>Desconto (R$)</label><input type="number" id="v-desc" min="0" step="0.01" value="0"></div>
-          <div class="campo" style="grid-column: span 2"><label>Observação</label><input type="text" id="v-obs" value="${reserva && n(reserva.sinal) ? `Sinal de ${brl(reserva.sinal)} recebido na reserva` : ''}"></div>
+          <div class="campo"><label>Desconto (R$)</label><input type="number" id="v-desc" min="0" step="0.01" value="${venda ? n(venda.desconto) : 0}"></div>
+          <div class="campo" style="grid-column: span 2"><label>Observação</label><input type="text" id="v-obs" value="${esc(obsPadrao)}"></div>
         </div>
+        ${venda ? '<p class="small muted" style="margin:0 0 8px">Ao salvar, o estoque devolve os potes antigos e baixa os novos, e o Financeiro é ajustado. Sabores que já estavam na venda mantêm o preço cobrado.</p>' : ''}
         <div id="v-alerta"></div>
         <div class="total-box"><span id="v-resumo" class="muted">Nenhum sabor</span><b id="v-total">${brl(0)}</b></div>`,
-      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="v-salvar">Registrar venda</button>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="v-salvar">${venda ? 'Salvar alterações' : 'Registrar venda'}</button>`,
     });
     const atualizar = () => {
       const q = ler();
       const potes = Object.values(q).reduce((s, x) => s + x, 0);
-      const bruto = Object.entries(q).reduce((s, [id, x]) => s + x * n(prodPorId(id)?.preco_venda), 0);
+      const bruto = Object.entries(q).reduce((s, [id, x]) => s + x * precoDe(id), 0);
       d.$('#v-total').textContent = brl(Math.max(0, bruto - n(d.$('#v-desc').value)));
       d.$('#v-resumo').textContent = potes ? `${fmtAuto(potes)} pote(s) · ${brl(bruto)} bruto` : 'Nenhum sabor';
       const faltam = Object.entries(q).filter(([id, x]) => x > (estoque[id] || 0));
       d.$('#v-alerta').innerHTML = faltam.length ? `<div class="aviso small mt">Estoque do sistema menor que a venda: ${faltam.map(([id]) => esc(prodPorId(id)?.nome)).join(', ')}. A venda será registrada e a diferença aparece na contagem.</div>` : '';
     };
-    const ler = saboresUI(d.$('#v-sabores'), { qtds, precos: true, estoque, onChange: atualizar });
+    const ler = saboresUI(d.$('#v-sabores'), { qtds, precos: true, estoque, onChange: atualizar, incluir: Object.keys(qtds), precoDe });
     d.$('#v-desc').oninput = atualizar;
     atualizar();
     d.$('#v-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
       const q = ler();
       if (!Object.keys(q).length) throw new Error('Escolha ao menos um sabor.');
+      if (venda) {
+        await rpc('rpc_editar_venda', { p: {
+          id: venda.id, data: d.$('#v-data').value, cliente: d.$('#v-cliente').value.trim(), canal: d.$('#v-canal').value,
+          pagamento: d.$('#v-pag').value, desconto: n(d.$('#v-desc').value), obs: d.$('#v-obs').value.trim(),
+          itens: Object.entries(q).map(([produto_id, quantidade]) => ({ produto_id, quantidade, preco_unitario: precoDe(produto_id) })),
+        } });
+        d.fechar(); toast('Venda atualizada.', 'ok'); recarregar(); return;
+      }
       await rpc('rpc_registrar_venda', { p: {
         unidade_id: S.un, data: d.$('#v-data').value, cliente: d.$('#v-cliente').value.trim(), canal: d.$('#v-canal').value,
         pagamento: d.$('#v-pag').value, desconto: n(d.$('#v-desc').value), obs: d.$('#v-obs').value.trim(), reserva_id: reserva?.id || null,
