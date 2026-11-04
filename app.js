@@ -1405,7 +1405,7 @@
     }
     el.innerHTML = cabecalho('Fichas técnicas', `Custos calculados com o custo médio de <b>${esc(nomeCurto(unAtual()))}</b> · meta de CMV ${pct(meta, 0)}`,
       ehGestor() ? `<button class="btn" id="b-novo">${ic('mais')} ${S.abaFic === 'produtos' ? 'Novo sabor' : 'Novo preparo'}</button>` : '') + `
-      <div class="aviso rosa"><span><b>Rendimento padrão:</b> 1 massa = <b>${pr} potes</b> (75 g por pote) · 1 recheio = <b>${potesRecheio()} potes</b> (cerca de 142 g por pote). Pote de 220 ml.</span></div>
+      <div class="aviso rosa"><span><b>Rendimento padrão:</b> 1 massa = <b>${pr} potes</b> (cerca de ${fmt(n(S.cat.preparos.find((x) => x.codigo === 'PB-01')?.rendimento) / pr, 0)} g por pote) · 1 recheio = <b>${potesRecheio()} potes</b> (cerca de 142 g por pote). Pote de 220 ml.</span></div>
       <div class="abas mt">${[['produtos', 'Sabores (potes)'], ['preparos', 'Preparos (massa, cremes, geleia)']].map(([k, t]) => `<button data-aba="${k}" class="${S.abaFic === k ? 'ativo' : ''}">${t}</button>`).join('')}</div>
       ${corpo}`;
     $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaFic = b.dataset.aba; recarregar(); }; });
