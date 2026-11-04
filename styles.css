@@ -280,7 +280,7 @@ input:disabled, select:disabled, textarea:disabled { background: var(--superfici
 .item-linha.f4 { grid-template-columns: 2fr 1fr 1fr auto; }
 .item-linha.f5 { grid-template-columns: 1fr 2fr 1fr 1.4fr auto; }
 .grade.lado { grid-template-columns: 2fr 1fr; }
-.item-linha.ent { grid-template-columns: 2fr .8fr .9fr 1fr 1fr 1.1fr auto; }
+.item-linha.ent { grid-template-columns: 1.8fr .8fr 1.25fr 1fr 1fr 1.1fr auto; }
 .ent-extra { grid-column: 1 / -1; margin-top: -2px; }
 .ent-extra summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--texto-2); width: max-content; }
 .ent-extra-campos { display: grid; grid-template-columns: repeat(2, minmax(150px, 220px)); gap: 10px; margin-top: 8px; }
@@ -427,3 +427,27 @@ dialog.modal::backdrop { background: rgba(30, 18, 12, .42); }
   body { background: #fff; }
   .card, .kpi { box-shadow: none; }
 }
+
+/* ---------- bases prontas, validade, metas, clientes, embalagens (014) */
+.aviso.vermelho { background: var(--vermelho-claro); border-color: #F1C6CC; color: #7E1A28; }
+.aviso.vermelho svg { width: 16px; height: 16px; vertical-align: -3px; }
+.bases-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.base-card { text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; background: var(--superficie);
+  border: 1px solid var(--borda); border-radius: var(--raio); box-shadow: var(--sombra-1); cursor: pointer; font: inherit; color: inherit; }
+.base-card:hover { border-color: var(--rosa); }
+.base-card .cod { font-size: 11px; color: var(--texto-3); font-weight: 700; letter-spacing: .06em; }
+.base-card b { font-size: 14px; line-height: 1.25; }
+.base-card .base-q { font-size: 20px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; color: var(--texto-3); margin-top: 2px; }
+.base-card.tem .base-q { color: var(--texto); }
+.base-card .badge { margin-top: 4px; }
+h3.sub-h { font-size: 13.5px; margin: 4px 0 8px; color: var(--texto-2); }
+.meta-bloco { padding: 10px 0; border-top: 1px dashed var(--borda); }
+.meta-bloco:first-of-type { border-top: 0; padding-top: 2px; }
+.meta-linha { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.meta-linha span { color: var(--texto-2); font-size: 13.5px; }
+.meta-linha b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.meta-bloco .barra-prog { margin: 2px 0 6px; }
+.cont-un { display: flex; gap: 4px; }
+.cont-un input { min-width: 52px; flex: 1 1 auto; width: auto; padding-left: 8px; padding-right: 4px; }
+.cont-un select { width: 54px !important; flex: 0 0 54px; padding-left: 6px; padding-right: 2px; background-position: right 4px center; }
+.kpi .valor.neg { color: var(--vermelho); }
