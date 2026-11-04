@@ -605,24 +605,43 @@
     const ativas = vendas.filter((v) => v.status === 'ativa');
     const tot = ativas.reduce((s, v) => s + n(v.total), 0);
     const potes = itens.filter((i) => ativas.some((v) => v.id === i.venda_id)).reduce((s, i) => s + n(i.quantidade), 0);
+    const fiados = await dados(sb.from('vendas').select('id,total').eq('unidade_id', S.un).eq('status', 'ativa').eq('pagamento', 'Fiado')).catch(() => []);
+    const aReceber = fiados.reduce((s, v) => s + n(v.total), 0);
 
-    el.innerHTML = cabecalho('Vendas', `${esc(nomeCurto(unAtual()))} · ${fmt(ativas.length)} vendas · ${fmtAuto(potes)} potes · ${brl(tot)}`,
+    el.innerHTML = cabecalho('Vendas', `${esc(nomeCurto(unAtual()))} · ${fmt(ativas.length)} vendas · ${fmtAuto(potes)} potes · ${brl(tot)}${aReceber > 0 ? ` · <b class="neg">fiado a receber ${brl(aReceber)}</b> (${fmt(fiados.length)})` : ''}`,
       `<div id="periodo"></div><button class="btn" id="b-nova">${ic('mais')} Nova venda</button>`) + `
       <div class="card">${tabela(['Data', 'Cliente', 'Sabores', 'Canal', 'Pagamento', '#Total', 'Status', ''],
         vendas.map((v) => `<tr class="${v.status === 'cancelada' ? 'riscado' : ''}">
           <td>${dataCurta(v.data)}</td><td>${esc(v.cliente || '—')}${v.reserva_id ? ' <span class="badge rosa">reserva</span>' : ''}</td>
-          <td class="small">${resumoItens(porVenda[v.id] || [])}</td><td>${esc(v.canal || '—')}</td><td>${esc(v.pagamento || '—')}</td>
+          <td class="small">${resumoItens(porVenda[v.id] || [])}</td><td>${esc(v.canal || '—')}</td><td>${esc(v.pagamento || '—')}${v.status === 'ativa' && v.pagamento === 'Fiado' ? ' <span class="badge vermelho">a receber</span>' : ''}${v.recebido_em ? `<div class="small muted">recebido ${dataCurta(v.recebido_em)}</div>` : ''}</td>
           <td class="num">${brl(v.total)}${n(v.desconto) ? `<div class="small muted">desc. ${brl(v.desconto)}</div>` : ''}</td>
           <td>${badgeStatus(v.status)}</td>
-          <td>${v.status === 'ativa' ? `<button class="btn perigo mini" data-cancelar="${v.id}">Cancelar</button>` : ''}</td></tr>`),
+          <td><div style="display:flex;gap:6px;justify-content:flex-end">${v.status === 'ativa' && v.pagamento === 'Fiado' ? `<button class="btn mini" data-receber="${v.id}">Receber</button>` : ''}${v.status === 'ativa' ? `<button class="btn perigo mini" data-cancelar="${v.id}">Cancelar</button>` : ''}</div></td></tr>`),
         { vazio: 'Nenhuma venda no período.', rodape: vendas.length ? `<tr><td colspan="5">Total (vendas ativas)</td><td class="num">${brl(tot)}</td><td colspan="2"></td></tr>` : '' })}</div>`;
     seletorPeriodo($('#periodo', el), (np) => { S.pVendas = np; recarregar(); }, S.pVendas);
     $('#b-nova', el).onclick = () => formVenda();
+    $$('[data-receber]', el).forEach((b) => { b.onclick = () => formReceberFiado(vendas.find((v) => v.id === b.dataset.receber)); });
     $$('[data-cancelar]', el).forEach((b) => {
       b.onclick = async () => {
         if (!await confirmar('Cancelar esta venda? Os potes voltam para o estoque.', { ok: 'Cancelar venda', perigo: true })) return;
         try { await rpc('rpc_cancelar_venda', { p_id: b.dataset.cancelar }); toast('Venda cancelada.', 'ok'); recarregar(); } catch (e) { falha(e); }
       };
+    });
+  }
+
+  function formReceberFiado(v) {
+    if (!v) return;
+    const d = abrirModal({ titulo: 'Receber venda fiado', classe: 'estreito',
+      corpo: `<p class="muted" style="margin-top:0">${esc(v.cliente || 'Cliente')} · venda de ${dataBR(v.data)} · <b>${brl(v.total)}</b></p>
+        <div class="linha-campos">
+          <div class="campo"><label>Como pagou</label><select id="rf-pag">${PAGAMENTOS.filter((x) => x !== 'Fiado').map((x) => `<option>${esc(x)}</option>`).join('')}</select></div>
+          <div class="campo"><label>Data do recebimento</label><input type="date" id="rf-data" value="${hoje()}"></div>
+        </div>
+        <p class="small muted" style="margin:0">O valor entra no saldo do Financeiro na data do recebimento.</p>`,
+      rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="rf-ok">Confirmar recebimento</button>` });
+    d.$('#rf-ok').onclick = (e) => ocupado(e.currentTarget, async () => {
+      await rpc('rpc_receber_fiado', { p_id: v.id, p_pagamento: d.$('#rf-pag').value, p_data: d.$('#rf-data').value });
+      d.fechar(); toast('Pagamento recebido.', 'ok'); recarregar();
     });
   }
 
