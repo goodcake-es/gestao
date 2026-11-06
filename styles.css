@@ -451,3 +451,4 @@ h3.sub-h { font-size: 13.5px; margin: 4px 0 8px; color: var(--texto-2); }
 .cont-un input { min-width: 52px; flex: 1 1 auto; width: auto; padding-left: 8px; padding-right: 4px; }
 .cont-un select { width: 54px !important; flex: 0 0 54px; padding-left: 6px; padding-right: 2px; background-position: right 4px center; }
 .kpi .valor.neg { color: var(--vermelho); }
+.badge.gelo { background: #E3EFF8; color: #1D5A8A; }
