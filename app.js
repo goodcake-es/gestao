@@ -103,6 +103,9 @@
   const inicioSemana = (d = hoje()) => addDias(d, -((new Date(d + 'T12:00:00').getDay() + 6) % 7));
   const diasDesde = (d) => d ? Math.round((new Date(hoje() + 'T12:00:00') - new Date(String(d).slice(0, 10) + 'T12:00:00')) / 864e5) : null;
   const tempoDesde = (d) => { const k = diasDesde(d); return k === null ? '' : k <= 0 ? 'hoje' : k === 1 ? 'ontem' : `há ${k} dias`; };
+  // onde a base está guardada
+  const badgeArmaz = (a, desc) => a === 'freezer' ? '<span class="badge gelo">❄ congelada</span>'
+    : a === 'descongelada' ? `<span class="badge dourado">descongelada${desc ? ' ' + dataCurta(desc) : ''}</span>` : '<span class="badge cinza">geladeira</span>';
   // validade: vencido / hoje / amanhã / em N dias
   function badgeValidade(v) {
     if (!v) return '<span class="muted">—</span>';
@@ -671,7 +674,7 @@
       <div class="grade k2 mt">
         <div class="card"><div class="card-topo"><h2>Validade</h2><span class="small muted">vence até amanhã</span></div>
           ${vencendo.length ? `<ul class="lista-simples">${vencendo.slice(0, 8).map((l) => `
-            <li><div class="grow"><b>${esc(nomeLote(l))}</b><div class="small muted">${l.tipo === 'pote' ? 'Pote pronto' : 'Base pronta'} · ${qtdLote(l)}</div></div>${badgeValidade(l.v)}</li>`).join('')}</ul>
+            <li><div class="grow"><b>${esc(nomeLote(l))}</b><div class="small muted">${l.tipo === 'pote' ? 'Pote pronto' : l.armazenamento === 'freezer' ? 'Base congelada' : l.armazenamento === 'descongelada' ? 'Base descongelada' : 'Base pronta'} · ${qtdLote(l)}</div></div>${badgeValidade(l.v)}</li>`).join('')}</ul>
             <div class="acoes mt"><a class="btn sec mini" href="#/perdas">Dar saída de perdas</a></div>`
             : '<div class="vazio">Nada vencendo hoje ou amanhã.</div>'}</div>
         <div class="card"><div class="card-topo"><h2>Metas</h2>${ehGestor() ? '<button class="btn sec mini" id="b-metas">Ajustar metas</button>' : ''}</div>
@@ -1029,7 +1032,9 @@
   }
 
   async function formCliente(c = null) {
-    let vendas = [], itens = [];
+    let vendas = [], itens = [], todos = [];
+    try { todos = await carregarClientes(); } catch { /* sem lista */ }
+    const lista_tem = (nome) => todos.some((x) => x.chave === chaveCli(nome) && x.chave !== c?.chave);
     if (c && n(c.compras) > 0) {
       try {
         vendas = (await dados(sb.from('vendas').select('*').eq('unidade_id', S.un).eq('status', 'ativa').order('data', { ascending: false }).limit(1000)))
@@ -1047,7 +1052,7 @@
           <div class="kpi cacau"><div class="rotulo">Total gasto</div><div class="valor">${brl(c.total)}</div><div class="det">última ${tempoDesde(c.ultima)}</div></div>
           <div class="kpi"><div class="rotulo">Fiado em aberto</div><div class="valor ${n(c.fiado) > 0 ? 'neg' : ''}">${brl(c.fiado)}</div><div class="det">${fmt(c.fiados)} venda(s)</div></div></div>` : ''}
         <div class="linha-campos mt">
-          <div class="campo" style="grid-column: span 2"><label>Nome</label><input type="text" id="c-nome" value="${esc(c?.nome || '')}" ${temVendas ? 'readonly title="O nome liga o cliente às vendas"' : ''}></div>
+          <div class="campo" style="grid-column: span 2"><label>Nome</label><input type="text" id="c-nome" value="${esc(c?.nome || '')}">${temVendas ? '<span class="ajuda">Mudar o nome atualiza também as vendas e reservas deste cliente.</span>' : ''}</div>
           <div class="campo"><label>WhatsApp</label><input type="tel" id="c-tel" value="${esc(c?.telefone || '')}" placeholder="(27) 99999-9999"></div>
           <div class="campo"><label>Aniversário</label><input type="date" id="c-aniv" value="${c?.aniversario ? String(c.aniversario).slice(0, 10) : ''}"></div>
         </div>
@@ -1062,8 +1067,9 @@
     d.$('#c-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
       const reg = { nome: d.$('#c-nome').value.trim(), telefone: d.$('#c-tel').value.trim() || null, aniversario: d.$('#c-aniv').value || null, obs: d.$('#c-obs').value.trim() || null };
       if (!reg.nome) throw new Error('Informe o nome do cliente.');
-      if (c?.cliente_id) await dados(sb.from('clientes').update(reg).eq('id', c.cliente_id));
-      else await dados(sb.from('clientes').insert({ ...reg, unidade_id: S.un }));
+      const renomeia = c && chaveCli(reg.nome) !== c.chave;
+      if (renomeia && temVendas && !await confirmar(`Trocar o nome de <b>${esc(c.nome)}</b> para <b>${esc(reg.nome)}</b>? As ${fmt(vendas.length)} compra(s) passam para o nome novo${lista_tem(reg.nome) ? ' e serão juntadas com o cliente que já tem esse nome' : ''}.`, { ok: 'Trocar nome' })) return;
+      await rpc('rpc_salvar_cliente', { p: { unidade_id: S.un, cliente_id: c?.cliente_id || null, nome_antigo: c?.nome || null, ...reg } });
       d.fechar(); toast('Cliente salvo.', 'ok'); recarregar();
     });
     const bx = d.$('#c-excluir');
@@ -1088,6 +1094,8 @@
     const rec = ult30.reduce((s, p) => s + n(p.receitas), 0);
     const pr = potesPorReceita();
     const valB = validadeMaisProxima(lotes, 'base');
+    const congB = {}; lotes.filter((l) => l.tipo === 'base').forEach((l) => { (congB[l.item_id] = congB[l.item_id] || []).push(l.armazenamento); });
+    const tudoCongelado = (id) => (congB[id] || []).length > 0 && congB[id].every((a) => a === 'freezer');
 
     // bases prontas agora
     const cards = S.cat.preparos.filter((x) => x.ativo).map((x) => {
@@ -1096,18 +1104,19 @@
         <span class="cod">${esc(x.codigo)}</span><b>${esc(x.nome)}</b>
         <span class="base-q">${q > 0 ? qtdFmt(q, 'g') : 'sem estoque'}</span>
         <span class="small muted">${q > 0 && porc ? `≈ ${fmt(Math.floor(q / porc + 0.05))} potes` : porc ? `${fmtAuto(porc)} g por pote` : 'vai dentro de outra base'}</span>
-        ${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : ''}</button>`;
+        ${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : ''}${q > 0 && tudoCongelado(x.id) ? '<span class="badge gelo">❄ congelada</span>' : ''}</button>`;
     }).join('');
 
     let corpo;
     if (S.abaProd === 'bases') {
-      corpo = `<div class="card">${tabela(['Data', 'Base', '#Receitas', '#Esperado', '#Pesado', 'Rendimento', 'Validade', '#Custo', ''],
+      corpo = `<div class="card">${tabela(['Data', 'Base', '#Receitas', '#Esperado', '#Pesado', 'Rendimento', 'Onde', 'Validade', '#Custo', ''],
         pbs.map((b) => `<tr class="${b.status === 'estornada' ? 'riscado' : ''}"><td>${dataBR(b.data)}</td><td><b>${esc(prepPorId(b.preparo_id)?.nome || '?')}</b>${b.obs ? `<div class="small muted">${esc(b.obs)}</div>` : ''}</td>
           <td class="num">${fmtAuto(Math.round(n(b.receitas) * 100) / 100)}</td><td class="num">${qtdFmt(b.peso_esperado, 'g')}</td><td class="num"><b>${qtdFmt(b.peso, 'g')}</b></td>
-          <td>${badgeRend(n(b.peso_esperado) ? n(b.peso) / n(b.peso_esperado) : null)}</td><td>${b.validade ? dataCurta(b.validade) : '—'}</td><td class="num">${brl(b.custo_total)}</td>
-          <td>${b.status === 'ativa' ? `<button class="btn perigo mini" data-estornar-base="${b.id}">Estornar</button>` : badgeStatus(b.status)}</td></tr>`),
+          <td>${badgeRend(n(b.peso_esperado) ? n(b.peso) / n(b.peso_esperado) : null)}</td><td>${badgeArmaz(b.armazenamento, b.descongelada_em)}</td><td>${b.validade ? dataCurta(b.validade) : '—'}</td><td class="num">${brl(b.custo_total)}</td>
+          <td>${b.status === 'ativa' ? `<div style="display:flex;gap:6px;justify-content:flex-end">${b.armazenamento === 'freezer' ? `<button class="btn sec mini" data-arm="${b.id}" data-para="descongelada">Descongelar</button>`
+            : b.armazenamento === 'descongelada' ? '' : `<button class="btn sec mini" data-arm="${b.id}" data-para="freezer">❄ Congelar</button>`}<button class="btn perigo mini" data-estornar-base="${b.id}">Estornar</button></div>` : badgeStatus(b.status)}</td></tr>`),
         { vazio: 'Nenhuma base lançada ainda. Use “Produzir base” quando fizer massa, creme ou geleia.' })}
-        <p class="small muted">Rendimento = peso pesado ÷ rendimento da ficha. Estornar devolve os ingredientes e tira a base do estoque.</p></div>`;
+        <p class="small muted">Rendimento = peso pesado ÷ rendimento da ficha. <b>Congelar</b> estende a validade (até 30 dias da produção); <b>Descongelar</b> dá 2 dias a partir de hoje — não congele de novo. Estornar devolve os ingredientes e tira a base do estoque.</p></div>`;
     } else {
       corpo = `<div class="grade k4">
         <div class="kpi"><div class="rotulo">Receitas (30 dias)</div><div class="valor">${fmtAuto(rec)}</div><div class="det">${fmt(ult30.length)} produções</div></div>
@@ -1132,6 +1141,13 @@
     $('#b-nova', el).onclick = () => formProducao();
     $('#b-base', el).onclick = () => formBase();
     $$('[data-base]', el).forEach((b) => { b.onclick = () => formBase(b.dataset.base); });
+    $$('[data-arm]', el).forEach((b) => {
+      b.onclick = async () => {
+        const para = b.dataset.para;
+        if (para === 'descongelada' && !await confirmar('Descongelar esta base? A validade passa a ser de 2 dias a partir de hoje e ela não deve ser congelada de novo.', { ok: 'Descongelar' })) return;
+        try { const v = await rpc('rpc_base_armazenamento', { p_id: b.dataset.arm, p_armazenamento: para, p_data: hoje() }); toast(`${para === 'freezer' ? 'Base congelada' : 'Base descongelada'}: vence ${dataBR(v)}.`, 'ok'); recarregar(); } catch (e) { falha(e); }
+      };
+    });
     $$('[data-estornar-base]', el).forEach((b) => {
       b.onclick = async () => {
         if (!await confirmar('Estornar esta base? Os ingredientes voltam para o estoque e a base sai do estoque.', { ok: 'Estornar', perigo: true })) return;
@@ -1157,7 +1173,10 @@
           <div class="campo"><label>Peso final pesado (g)</label><input type="number" id="b-peso" min="1" step="1" inputmode="numeric"><span class="ajuda" id="b-peso-aj"></span></div>
           <div class="campo"><label>Validade</label><input type="date" id="b-val"><span class="ajuda" id="b-val-aj"></span></div>
         </div>
-        <div class="campo"><label>Observação</label><input type="text" id="b-obs" placeholder="Opcional. Ex.: sobra da produção de ontem"></div>
+        <div class="linha-campos">
+          <div class="campo"><label>Onde vai guardar</label><select id="b-arm"><option value="geladeira">Geladeira</option><option value="freezer">❄ Freezer (congelada)</option></select></div>
+          <div class="campo" style="grid-column: span 2"><label>Observação</label><input type="text" id="b-obs" placeholder="Opcional. Ex.: sobra da produção de ontem"></div>
+        </div>
         <div class="total-box"><span id="b-resumo" class="muted"></span><b id="b-rend">—</b></div>
         <div id="b-sub"></div>
         <details class="mt"><summary class="small" style="cursor:pointer">Ingredientes que saem do estoque</summary><div id="b-consumo" class="mt"></div></details>`,
@@ -1167,12 +1186,13 @@
     const atualizar = (resetVal = false) => {
       const x = prepPorId(d.$('#b-prep').value); if (!x) return;
       const rec = n(d.$('#b-rec').value), esp = n(x.rendimento) * rec;
-      const vd = n(x.validade_dias) || 3;
+      const frz = d.$('#b-arm').value === 'freezer';
+      const vd = frz ? (n(x.validade_congelado_dias) || 30) : (n(x.validade_dias) || 3);
       d.$('#b-rec-aj').textContent = `1 receita rende ${qtdFmt(x.rendimento, 'g')}`;
       d.$('#b-peso').placeholder = fmtAuto(Math.round(esp));
       d.$('#b-peso-aj').textContent = `esperado ${qtdFmt(esp, 'g')} · deixe vazio se não pesou`;
       if (resetVal || !valManual) { d.$('#b-val').value = addDias(d.$('#b-data').value || hoje(), vd); valManual = false; }
-      d.$('#b-val-aj').textContent = `${vd} dia(s) na geladeira`;
+      d.$('#b-val-aj').textContent = frz ? `${vd} dias congelada` : `${vd} dia(s) na geladeira`;
       const peso = n(d.$('#b-peso').value) || esp, porc = porcaoBase(x.id);
       d.$('#b-resumo').innerHTML = `${qtdFmt(peso, 'g')} de ${esc(x.nome)}${porc ? ` · dá ≈ <b>${fmt(Math.floor(peso / porc + 0.05))} potes</b> (${fmtAuto(porc)} g por pote)` : ''}`;
       d.$('#b-rend').innerHTML = n(d.$('#b-peso').value) && esp ? badgeRend(peso / esp) : '—';
@@ -1183,6 +1203,7 @@
     };
     d.$('#b-prep').onchange = () => atualizar(true);
     d.$('#b-data').onchange = () => atualizar(true);
+    d.$('#b-arm').onchange = () => atualizar(true);
     d.$('#b-val').onchange = () => { valManual = true; };
     d.$('#b-rec').oninput = () => atualizar(); d.$('#b-peso').oninput = () => atualizar();
     atualizar(true);
@@ -1191,7 +1212,7 @@
       if (!x) throw new Error('Escolha a base.');
       if (n(d.$('#b-rec').value) <= 0) throw new Error('Informe quantas receitas foram feitas.');
       await rpc('rpc_produzir_base', { p: { unidade_id: S.un, data: d.$('#b-data').value, preparo_id: x.id, receitas: n(d.$('#b-rec').value),
-        peso: n(d.$('#b-peso').value) || null, validade: d.$('#b-val').value || null, obs: d.$('#b-obs').value.trim() } });
+        peso: n(d.$('#b-peso').value) || null, validade: d.$('#b-val').value || null, obs: d.$('#b-obs').value.trim(), armazenamento: d.$('#b-arm').value } });
       await carregarEstoqueIns();
       const peso = n(d.$('#b-peso').value) || n(x.rendimento) * n(d.$('#b-rec').value);
       d.fechar(); toast(`Base lançada: ${qtdFmt(peso, 'g')} de ${x.nome}.`, 'ok'); recarregar();
@@ -1274,12 +1295,13 @@
     } else if (S.abaEst === 'bases') {
       const [estB, lotes] = await Promise.all([estoquePreparos(), lotesValidade()]);
       const valB = validadeMaisProxima(lotes, 'base');
+      const frzB = (id) => { const l = lotes.filter((x) => x.tipo === 'base' && x.item_id === id); return l.length && l.every((x) => x.armazenamento === 'freezer'); };
       let totV = 0;
       const linhas = S.cat.preparos.filter((x) => x.ativo).map((x) => {
         const q = estB[x.id]?.q || 0, c = custoBaseG(x.id, estB), porc = porcaoBase(x.id); totV += Math.max(q, 0) * c;
         return `<tr><td><b>${esc(x.nome)}</b> <span class="small muted">${esc(x.codigo)}</span></td><td class="num"><b>${qtdFmt(q, 'g')}</b></td>
           <td class="num">${q > 0 && porc ? '≈ ' + fmt(Math.floor(q / porc + 0.05)) : '—'}</td>
-          <td>${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : '<span class="muted">—</span>'}</td>
+          <td>${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) + (frzB(x.id) ? ' <span class="badge gelo">❄</span>' : '') : '<span class="muted">—</span>'}</td>
           <td class="num">${custoUnFmt(c, 'g')}</td><td class="num">${brl(Math.max(q, 0) * c)}</td></tr>`;
       });
       corpo = `<div class="card"><div class="card-topo"><h2>Bases prontas</h2><button class="btn sec mini" id="b-prod-base">${ic('receita')} Produzir base</button></div>
