@@ -819,7 +819,7 @@
           <div class="campo"><label>Data</label><input type="date" id="v-data" value="${venda ? venda.data : hoje()}"></div>
           <div class="campo"><label>Cliente</label><input type="text" id="v-cliente" value="${esc((venda ? venda.cliente : reserva?.cliente) || '')}" placeholder="Opcional"></div>
           <div class="campo"><label>Canal</label><select id="v-canal">${opcoes(CANAIS.concat(venda?.canal && !CANAIS.includes(venda.canal) ? [venda.canal] : []).map((c) => ({ id: c, nome: c })), venda ? venda.canal : reserva ? 'WhatsApp' : 'Trabalho')}</select></div>
-          <div class="campo"><label>Pagamento</label><select id="v-pag">${opcoes(PAGAMENTOS.concat(venda?.pagamento && !PAGAMENTOS.includes(venda.pagamento) ? [venda.pagamento] : []).map((c) => ({ id: c, nome: c })), venda ? venda.pagamento : 'Pix')}</select></div>
+          <div class="campo"><label>Pagamento</label><select id="v-pag">${opcoes(PAGAMENTOS.concat(venda?.pagamento && !PAGAMENTOS.includes(venda.pagamento) ? [venda.pagamento] : []).map((c) => ({ id: c, nome: c === 'Fiado' ? 'Fiado (paga depois)' : c })), venda ? venda.pagamento : reserva?.pagar_depois ? 'Fiado' : 'Pix')}</select></div>
         </div>
         <div class="campo"><label>Sabores</label><div id="v-sabores"></div></div>
         <div class="linha-campos">
@@ -827,6 +827,7 @@
           <div class="campo" style="grid-column: span 2"><label>Observação</label><input type="text" id="v-obs" value="${esc(obsPadrao)}"></div>
         </div>
         ${venda ? '<p class="small muted" style="margin:0 0 8px">Ao salvar, o estoque devolve os potes antigos e baixa os novos, e o Financeiro é ajustado. Sabores que já estavam na venda mantêm o preço cobrado.</p>' : ''}
+        <div id="v-fiado"></div>
         <div id="v-alerta"></div>
         <div class="total-box"><span id="v-resumo" class="muted">Nenhum sabor</span><b id="v-total">${brl(0)}</b></div>`,
       rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="v-salvar">${venda ? 'Salvar alterações' : 'Registrar venda'}</button>`,
@@ -842,11 +843,17 @@
     };
     const ler = saboresUI(d.$('#v-sabores'), { qtds, precos: true, estoque, onChange: atualizar, incluir: Object.keys(qtds), precoDe });
     sugerirClientes(d.$('#v-cliente'));
+    const avisoFiado = () => {
+      d.$('#v-fiado').innerHTML = d.$('#v-pag').value === 'Fiado'
+        ? `<div class="aviso small mt">O cliente leva agora e paga depois. A venda fica <b>a receber</b> e não entra no caixa até você usar <b>Receber</b>${reserva ? ' (em Vendas ou em Reservas › Entregues).' : ' em Vendas.'}</div>` : '';
+    };
+    d.$('#v-pag').onchange = avisoFiado; avisoFiado();
     d.$('#v-desc').oninput = atualizar;
     atualizar();
     d.$('#v-salvar').onclick = (e) => ocupado(e.currentTarget, async () => {
       const q = ler();
       if (!Object.keys(q).length) throw new Error('Escolha ao menos um sabor.');
+      if (d.$('#v-pag').value === 'Fiado' && !d.$('#v-cliente').value.trim()) throw new Error('Para venda fiado, informe o nome do cliente.');
       if (venda) {
         await rpc('rpc_editar_venda', { p: {
           id: venda.id, data: d.$('#v-data').value, cliente: d.$('#v-cliente').value.trim(), canal: d.$('#v-canal').value,
@@ -860,7 +867,8 @@
         pagamento: d.$('#v-pag').value, desconto: n(d.$('#v-desc').value), obs: d.$('#v-obs').value.trim(), reserva_id: reserva?.id || null,
         itens: Object.entries(q).map(([produto_id, quantidade]) => ({ produto_id, quantidade, preco_unitario: n(prodPorId(produto_id)?.preco_venda) })),
       } });
-      d.fechar(); toast('Venda registrada!', 'ok'); recarregar();
+      const fiado = d.$('#v-pag').value === 'Fiado';
+      d.fechar(); toast(fiado ? (reserva ? 'Reserva entregue · pagamento a receber.' : 'Venda registrada · a receber.') : reserva ? 'Reserva entregue!' : 'Venda registrada!', 'ok'); recarregar();
     });
   }
 
@@ -875,6 +883,16 @@
     ]);
     const itens = reservas.length ? await dados(sb.from('reserva_itens').select('*').in('reserva_id', reservas.map((r) => r.id))) : [];
     const porRes = {}; itens.forEach((i) => { (porRes[i.reserva_id] = porRes[i.reserva_id] || []).push(i); });
+    const idsVenda = reservas.map((r) => r.venda_id).filter(Boolean);
+    const vendasRes = idsVenda.length ? await dados(sb.from('vendas').select('id,data,pagamento,status,total,recebido_em,cliente').in('id', idsVenda)).catch(() => []) : [];
+    const vendaPorId = {}; vendasRes.forEach((v) => { vendaPorId[v.id] = v; });
+    const aReceber = (r) => { const v = vendaPorId[r.venda_id]; return v && v.status === 'ativa' && v.pagamento === 'Fiado' ? v : null; };
+    const pagtoReserva = (r) => {
+      const v = vendaPorId[r.venda_id];
+      if (!v) return badgeStatus(r.status);
+      if (aReceber(r)) return `<span class="badge vermelho">a receber ${brl(v.total)}</span>`;
+      return `<span class="badge verde">pago</span><div class="small muted">${esc(v.pagamento || '')}${v.recebido_em ? ' · ' + dataCurta(v.recebido_em) : ''}</div>`;
+    };
 
     // demanda de sabores reservados x estoque
     let demanda = '';
@@ -893,19 +911,19 @@
     el.innerHTML = cabecalho('Reservas', `${esc(nomeCurto(unAtual()))} · reserve sabores para entregar depois`, `<button class="btn" id="b-nova">${ic('mais')} Nova reserva</button>`) + `
       <div class="abas">${['abertas', 'entregues', 'canceladas'].map((a) => `<button data-aba="${a}" class="${S.abaRes === a ? 'ativo' : ''}">${a[0].toUpperCase() + a.slice(1)}</button>`).join('')}</div>
       ${demanda}
-      <div class="card">${tabela(['Entrega', 'Cliente', 'Sabores', '#Sinal', 'Status', ''],
+      <div class="card">${tabela(['Entrega', 'Cliente', 'Sabores', '#Sinal', S.abaRes === 'entregues' ? 'Pagamento' : 'Status', ''],
         reservas.map((r) => {
           const atrasada = S.abaRes === 'abertas' && r.data_entrega < hoje();
           const link = wa(r.telefone, `Oi, ${r.cliente}! Aqui é da Good Cake 🍰`);
           return `<tr>
             <td><b>${dataCurta(r.data_entrega)}</b>${r.hora ? ' ' + esc(r.hora) : ''}${atrasada ? ' <span class="badge vermelho">atrasada</span>' : r.data_entrega === hoje() ? ' <span class="badge dourado">hoje</span>' : ''}</td>
-            <td>${esc(r.cliente)}${r.telefone ? `<div class="small">${link ? `<a href="${link}" target="_blank" rel="noopener">${esc(r.telefone)}</a>` : esc(r.telefone)}</div>` : ''}${r.obs ? `<div class="small muted">${esc(r.obs)}</div>` : ''}</td>
+            <td>${esc(r.cliente)}${r.pagar_depois && S.abaRes === 'abertas' ? ' <span class="badge dourado">paga depois</span>' : ''}${r.telefone ? `<div class="small">${link ? `<a href="${link}" target="_blank" rel="noopener">${esc(r.telefone)}</a>` : esc(r.telefone)}</div>` : ''}${r.obs ? `<div class="small muted">${esc(r.obs)}</div>` : ''}</td>
             <td class="small">${resumoItens(porRes[r.id] || [])}</td>
             <td class="num">${n(r.sinal) ? brl(r.sinal) : '—'}</td>
-            <td>${badgeStatus(r.status)}</td>
-            <td><div class="acoes">${S.abaRes === 'abertas' ? `
+            <td>${S.abaRes === 'entregues' ? pagtoReserva(r) : badgeStatus(r.status)}</td>
+            <td><div class="acoes">${S.abaRes === 'entregues' && aReceber(r) ? `<button class="btn mini" data-receber="${r.venda_id}">Receber</button>` : ''}${S.abaRes === 'abertas' ? `
               ${r.status === 'pendente' ? `<button class="btn sec mini" data-conf="${r.id}">Confirmar</button>` : ''}
-              <button class="btn mini" data-entregar="${r.id}">Entregar</button>
+              <button class="btn mini" data-entregar="${r.id}">${r.pagar_depois ? 'Entregar · paga depois' : 'Entregar'}</button>
               <button class="icone-btn" title="Editar" data-editar="${r.id}">${ic('lapis')}</button>
               <button class="icone-btn" title="Cancelar" data-canc="${r.id}">${ic('x')}</button>` : ''}</div></td></tr>`;
         }), { vazio: 'Nenhuma reserva aqui.' })}</div>`;
@@ -914,6 +932,7 @@
     const achar = (id) => reservas.find((r) => r.id === id);
     $$('[data-editar]', el).forEach((b) => { b.onclick = () => formReserva(achar(b.dataset.editar), porRes[b.dataset.editar] || []); });
     $$('[data-entregar]', el).forEach((b) => { b.onclick = () => formVenda({ reserva: achar(b.dataset.entregar), itensReserva: porRes[b.dataset.entregar] || [] }); });
+    $$('[data-receber]', el).forEach((b) => { b.onclick = () => formReceberFiado(vendaPorId[b.dataset.receber]); });
     const mudarStatus = async (id, status, msg) => {
       try { await dados(sb.from('reservas').update({ status }).eq('id', id)); toast(msg, 'ok'); recarregar(); } catch (e) { falha(e); }
     };
@@ -940,6 +959,7 @@
           <div class="campo"><label>Status</label><select id="r-status">${opcoes([{ id: 'pendente', nome: 'Pendente' }, { id: 'confirmada', nome: 'Confirmada' }], r?.status || 'pendente')}</select></div>
           <div class="campo" style="grid-column: span 2"><label>Observação</label><input type="text" id="r-obs" value="${esc(r?.obs || '')}" placeholder="Endereço, retirada, etc."></div>
         </div>
+        <label class="check"><input type="checkbox" id="r-depois" ${r?.pagar_depois ? 'checked' : ''}> Cliente paga depois de retirar (na entrega vira venda fiado, a receber)</label>
         <div class="total-box"><span class="muted" id="r-resumo"></span><b id="r-total"></b></div>`,
       rodape: `<button class="btn sec" data-fechar>Cancelar</button><button class="btn" id="r-salvar">Salvar reserva</button>`,
     });
@@ -958,7 +978,7 @@
       await rpc('rpc_salvar_reserva', { p: {
         id: r?.id || null, unidade_id: S.un, cliente: d.$('#r-cli').value.trim(), telefone: d.$('#r-tel').value.trim(),
         data_entrega: d.$('#r-data').value, hora: d.$('#r-hora').value, sinal: n(d.$('#r-sinal').value), status: d.$('#r-status').value,
-        obs: d.$('#r-obs').value.trim(), itens: Object.entries(q).map(([produto_id, quantidade]) => ({ produto_id, quantidade })),
+        obs: d.$('#r-obs').value.trim(), pagar_depois: d.$('#r-depois').checked, itens: Object.entries(q).map(([produto_id, quantidade]) => ({ produto_id, quantidade })),
       } });
       d.fechar(); toast('Reserva salva!', 'ok'); recarregar();
     });
