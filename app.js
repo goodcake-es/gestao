@@ -104,8 +104,6 @@
   const diasDesde = (d) => d ? Math.round((new Date(hoje() + 'T12:00:00') - new Date(String(d).slice(0, 10) + 'T12:00:00')) / 864e5) : null;
   const tempoDesde = (d) => { const k = diasDesde(d); return k === null ? '' : k <= 0 ? 'hoje' : k === 1 ? 'ontem' : `há ${k} dias`; };
   // onde a base está guardada
-  const badgeArmaz = (a, desc) => a === 'freezer' ? '<span class="badge gelo">❄ congelada</span>'
-    : a === 'descongelada' ? `<span class="badge dourado">descongelada${desc ? ' ' + dataCurta(desc) : ''}</span>` : '<span class="badge cinza">geladeira</span>';
   // validade: vencido / hoje / amanhã / em N dias
   function badgeValidade(v) {
     if (!v) return '<span class="muted">—</span>';
@@ -640,7 +638,8 @@
 
     // validade: o que vence até amanhã (potes e bases em estoque)
     const limite = addDias(hoje(), 1);
-    const vencendo = lotes.map((l) => ({ ...l, v: String(l.validade).slice(0, 10) })).filter((l) => l.v <= limite)
+    const vencendo = Object.values(lotes.map((l) => ({ ...l, v: String(l.validade).slice(0, 10) })).filter((l) => l.v <= limite)
+      .reduce((o, l) => { const k = l.tipo + l.item_id + l.v; if (o[k]) o[k].quantidade = n(o[k].quantidade) + n(l.quantidade); else o[k] = { ...l }; return o; }, {}))
       .sort((a, b) => a.v.localeCompare(b.v));
     const nomeLote = (l) => l.tipo === 'pote' ? prodPorId(l.item_id)?.nome : prepPorId(l.item_id)?.nome;
     const qtdLote = (l) => l.tipo === 'pote' ? `${fmtAuto(l.quantidade)} pote(s)` : qtdFmt(l.quantidade, 'g');
@@ -674,7 +673,7 @@
       <div class="grade k2 mt">
         <div class="card"><div class="card-topo"><h2>Validade</h2><span class="small muted">vence até amanhã</span></div>
           ${vencendo.length ? `<ul class="lista-simples">${vencendo.slice(0, 8).map((l) => `
-            <li><div class="grow"><b>${esc(nomeLote(l))}</b><div class="small muted">${l.tipo === 'pote' ? 'Pote pronto' : l.armazenamento === 'freezer' ? 'Base congelada' : l.armazenamento === 'descongelada' ? 'Base descongelada' : 'Base pronta'} · ${qtdLote(l)}</div></div>${badgeValidade(l.v)}</li>`).join('')}</ul>
+            <li><div class="grow"><b>${esc(nomeLote(l))}</b><div class="small muted">${l.tipo === 'pote' ? 'Pote pronto' : 'Base pronta'} · ${qtdLote(l)}</div></div>${badgeValidade(l.v)}</li>`).join('')}</ul>
             <div class="acoes mt"><a class="btn sec mini" href="#/perdas">Dar saída de perdas</a></div>`
             : '<div class="vazio">Nada vencendo hoje ou amanhã.</div>'}</div>
         <div class="card"><div class="card-topo"><h2>Metas</h2>${ehGestor() ? '<button class="btn sec mini" id="b-metas">Ajustar metas</button>' : ''}</div>
@@ -1114,8 +1113,6 @@
     const rec = ult30.reduce((s, p) => s + n(p.receitas), 0);
     const pr = potesPorReceita();
     const valB = validadeMaisProxima(lotes, 'base');
-    const congB = {}; lotes.filter((l) => l.tipo === 'base').forEach((l) => { (congB[l.item_id] = congB[l.item_id] || []).push(l.armazenamento); });
-    const tudoCongelado = (id) => (congB[id] || []).length > 0 && congB[id].every((a) => a === 'freezer');
 
     // bases prontas agora
     const cards = S.cat.preparos.filter((x) => x.ativo).map((x) => {
@@ -1124,19 +1121,18 @@
         <span class="cod">${esc(x.codigo)}</span><b>${esc(x.nome)}</b>
         <span class="base-q">${q > 0 ? qtdFmt(q, 'g') : 'sem estoque'}</span>
         <span class="small muted">${q > 0 && porc ? `≈ ${fmt(Math.floor(q / porc + 0.05))} potes` : porc ? `${fmtAuto(porc)} g por pote` : 'vai dentro de outra base'}</span>
-        ${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : ''}${q > 0 && tudoCongelado(x.id) ? '<span class="badge gelo">❄ congelada</span>' : ''}</button>`;
+        ${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : ''}</button>`;
     }).join('');
 
     let corpo;
     if (S.abaProd === 'bases') {
-      corpo = `<div class="card">${tabela(['Data', 'Base', '#Receitas', '#Esperado', '#Pesado', 'Rendimento', 'Onde', 'Validade', '#Custo', ''],
+      corpo = `<div class="card">${tabela(['Data', 'Base', '#Receitas', '#Esperado', '#Pesado', 'Rendimento', 'Validade', '#Custo', ''],
         pbs.map((b) => `<tr class="${b.status === 'estornada' ? 'riscado' : ''}"><td>${dataBR(b.data)}</td><td><b>${esc(prepPorId(b.preparo_id)?.nome || '?')}</b>${b.obs ? `<div class="small muted">${esc(b.obs)}</div>` : ''}</td>
           <td class="num">${fmtAuto(Math.round(n(b.receitas) * 100) / 100)}</td><td class="num">${qtdFmt(b.peso_esperado, 'g')}</td><td class="num"><b>${qtdFmt(b.peso, 'g')}</b></td>
-          <td>${badgeRend(n(b.peso_esperado) ? n(b.peso) / n(b.peso_esperado) : null)}</td><td>${badgeArmaz(b.armazenamento, b.descongelada_em)}</td><td>${b.validade ? dataCurta(b.validade) : '—'}</td><td class="num">${brl(b.custo_total)}</td>
-          <td>${b.status === 'ativa' ? `<div style="display:flex;gap:6px;justify-content:flex-end">${b.armazenamento === 'freezer' ? `<button class="btn sec mini" data-arm="${b.id}" data-para="descongelada">Descongelar</button>`
-            : b.armazenamento === 'descongelada' ? '' : `<button class="btn sec mini" data-arm="${b.id}" data-para="freezer">❄ Congelar</button>`}<button class="btn perigo mini" data-estornar-base="${b.id}">Estornar</button></div>` : badgeStatus(b.status)}</td></tr>`),
+          <td>${badgeRend(n(b.peso_esperado) ? n(b.peso) / n(b.peso_esperado) : null)}</td><td>${b.validade ? dataCurta(b.validade) : '—'}</td><td class="num">${brl(b.custo_total)}</td>
+          <td>${b.status === 'ativa' ? `<div style="display:flex;gap:6px;justify-content:flex-end"><button class="btn perigo mini" data-estornar-base="${b.id}">Estornar</button></div>` : badgeStatus(b.status)}</td></tr>`),
         { vazio: 'Nenhuma base lançada ainda. Use “Produzir base” quando fizer massa, creme ou geleia.' })}
-        <p class="small muted">Rendimento = peso pesado ÷ rendimento da ficha. <b>Congelar</b> estende a validade (até 30 dias da produção); <b>Descongelar</b> dá 2 dias a partir de hoje — não congele de novo. Estornar devolve os ingredientes e tira a base do estoque.</p></div>`;
+        <p class="small muted">Rendimento = peso pesado ÷ rendimento da ficha. Lance cada produção uma vez só, com o peso total, mesmo que parte vá para o freezer. Estornar devolve os ingredientes e tira a base do estoque.</p></div>`;
     } else {
       corpo = `<div class="grade k4">
         <div class="kpi"><div class="rotulo">Receitas (30 dias)</div><div class="valor">${fmtAuto(rec)}</div><div class="det">${fmt(ult30.length)} produções</div></div>
@@ -1161,13 +1157,6 @@
     $('#b-nova', el).onclick = () => formProducao();
     $('#b-base', el).onclick = () => formBase();
     $$('[data-base]', el).forEach((b) => { b.onclick = () => formBase(b.dataset.base); });
-    $$('[data-arm]', el).forEach((b) => {
-      b.onclick = async () => {
-        const para = b.dataset.para;
-        if (para === 'descongelada' && !await confirmar('Descongelar esta base? A validade passa a ser de 2 dias a partir de hoje e ela não deve ser congelada de novo.', { ok: 'Descongelar' })) return;
-        try { const v = await rpc('rpc_base_armazenamento', { p_id: b.dataset.arm, p_armazenamento: para, p_data: hoje() }); toast(`${para === 'freezer' ? 'Base congelada' : 'Base descongelada'}: vence ${dataBR(v)}.`, 'ok'); recarregar(); } catch (e) { falha(e); }
-      };
-    });
     $$('[data-estornar-base]', el).forEach((b) => {
       b.onclick = async () => {
         if (!await confirmar('Estornar esta base? Os ingredientes voltam para o estoque e a base sai do estoque.', { ok: 'Estornar', perigo: true })) return;
@@ -1194,8 +1183,7 @@
           <div class="campo"><label>Validade</label><input type="date" id="b-val"><span class="ajuda" id="b-val-aj"></span></div>
         </div>
         <div class="linha-campos">
-          <div class="campo"><label>Onde vai guardar</label><select id="b-arm"><option value="geladeira">Geladeira</option><option value="freezer">❄ Freezer (congelada)</option></select></div>
-          <div class="campo" style="grid-column: span 2"><label>Observação</label><input type="text" id="b-obs" placeholder="Opcional. Ex.: sobra da produção de ontem"></div>
+          <div class="campo" style="grid-column: span 3"><label>Observação</label><input type="text" id="b-obs" placeholder="Opcional. Ex.: sobra da produção de ontem"></div>
         </div>
         <div class="total-box"><span id="b-resumo" class="muted"></span><b id="b-rend">—</b></div>
         <div id="b-sub"></div>
@@ -1206,13 +1194,12 @@
     const atualizar = (resetVal = false) => {
       const x = prepPorId(d.$('#b-prep').value); if (!x) return;
       const rec = n(d.$('#b-rec').value), esp = n(x.rendimento) * rec;
-      const frz = d.$('#b-arm').value === 'freezer';
-      const vd = frz ? (n(x.validade_congelado_dias) || 30) : (n(x.validade_dias) || 3);
+      const vd = n(x.validade_congelado_dias) || 30;
       d.$('#b-rec-aj').textContent = `1 receita rende ${qtdFmt(x.rendimento, 'g')}`;
       d.$('#b-peso').placeholder = fmtAuto(Math.round(esp));
       d.$('#b-peso-aj').textContent = `esperado ${qtdFmt(esp, 'g')} · deixe vazio se não pesou`;
       if (resetVal || !valManual) { d.$('#b-val').value = addDias(d.$('#b-data').value || hoje(), vd); valManual = false; }
-      d.$('#b-val-aj').textContent = frz ? `${vd} dias congelada` : `${vd} dia(s) na geladeira`;
+      d.$('#b-val-aj').textContent = `${vd} dias no freezer · fora dele, use em ${n(x.validade_dias) || 3} dia(s)`;
       const peso = n(d.$('#b-peso').value) || esp, porc = porcaoBase(x.id);
       d.$('#b-resumo').innerHTML = `${qtdFmt(peso, 'g')} de ${esc(x.nome)}${porc ? ` · dá ≈ <b>${fmt(Math.floor(peso / porc + 0.05))} potes</b> (${fmtAuto(porc)} g por pote)` : ''}`;
       d.$('#b-rend').innerHTML = n(d.$('#b-peso').value) && esp ? badgeRend(peso / esp) : '—';
@@ -1223,7 +1210,6 @@
     };
     d.$('#b-prep').onchange = () => atualizar(true);
     d.$('#b-data').onchange = () => atualizar(true);
-    d.$('#b-arm').onchange = () => atualizar(true);
     d.$('#b-val').onchange = () => { valManual = true; };
     d.$('#b-rec').oninput = () => atualizar(); d.$('#b-peso').oninput = () => atualizar();
     atualizar(true);
@@ -1232,7 +1218,7 @@
       if (!x) throw new Error('Escolha a base.');
       if (n(d.$('#b-rec').value) <= 0) throw new Error('Informe quantas receitas foram feitas.');
       await rpc('rpc_produzir_base', { p: { unidade_id: S.un, data: d.$('#b-data').value, preparo_id: x.id, receitas: n(d.$('#b-rec').value),
-        peso: n(d.$('#b-peso').value) || null, validade: d.$('#b-val').value || null, obs: d.$('#b-obs').value.trim(), armazenamento: d.$('#b-arm').value } });
+        peso: n(d.$('#b-peso').value) || null, validade: d.$('#b-val').value || null, obs: d.$('#b-obs').value.trim() } });
       await carregarEstoqueIns();
       const peso = n(d.$('#b-peso').value) || n(x.rendimento) * n(d.$('#b-rec').value);
       d.fechar(); toast(`Base lançada: ${qtdFmt(peso, 'g')} de ${x.nome}.`, 'ok'); recarregar();
@@ -1315,13 +1301,12 @@
     } else if (S.abaEst === 'bases') {
       const [estB, lotes] = await Promise.all([estoquePreparos(), lotesValidade()]);
       const valB = validadeMaisProxima(lotes, 'base');
-      const frzB = (id) => { const l = lotes.filter((x) => x.tipo === 'base' && x.item_id === id); return l.length && l.every((x) => x.armazenamento === 'freezer'); };
       let totV = 0;
       const linhas = S.cat.preparos.filter((x) => x.ativo).map((x) => {
         const q = estB[x.id]?.q || 0, c = custoBaseG(x.id, estB), porc = porcaoBase(x.id); totV += Math.max(q, 0) * c;
         return `<tr><td><b>${esc(x.nome)}</b> <span class="small muted">${esc(x.codigo)}</span></td><td class="num"><b>${qtdFmt(q, 'g')}</b></td>
           <td class="num">${q > 0 && porc ? '≈ ' + fmt(Math.floor(q / porc + 0.05)) : '—'}</td>
-          <td>${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) + (frzB(x.id) ? ' <span class="badge gelo">❄</span>' : '') : '<span class="muted">—</span>'}</td>
+          <td>${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : '<span class="muted">—</span>'}</td>
           <td class="num">${custoUnFmt(c, 'g')}</td><td class="num">${brl(Math.max(q, 0) * c)}</td></tr>`;
       });
       corpo = `<div class="card"><div class="card-topo"><h2>Bases prontas</h2><button class="btn sec mini" id="b-prod-base">${ic('receita')} Produzir base</button></div>
