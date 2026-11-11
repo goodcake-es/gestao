@@ -1119,7 +1119,7 @@
       const q = estB[x.id]?.q || 0, porc = porcaoBase(x.id);
       return `<button type="button" class="base-card ${q > 0 ? 'tem' : ''}" data-base="${x.id}">
         <span class="cod">${esc(x.codigo)}</span><b>${esc(x.nome)}</b>
-        <span class="base-q">${q > 0 ? qtdFmt(q, 'g') : 'sem estoque'}</span>
+        <span class="base-q">${q > 0 ? qtdFmt(q, 'g') : q < 0 ? qtdFmt(q, 'g') : 'sem estoque'}</span>
         <span class="small muted">${q > 0 && porc ? `≈ ${fmt(Math.floor(q / porc + 0.05))} potes` : porc ? `${fmtAuto(porc)} g por pote` : 'vai dentro de outra base'}</span>
         ${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : ''}</button>`;
     }).join('');
@@ -1156,12 +1156,36 @@
     $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaProd = b.dataset.aba; recarregar(); }; });
     $('#b-nova', el).onclick = () => formProducao();
     $('#b-base', el).onclick = () => formBase();
-    $$('[data-base]', el).forEach((b) => { b.onclick = () => formBase(b.dataset.base); });
+    $$('[data-base]', el).forEach((b) => { b.onclick = () => formCorrigirBase(b.dataset.base); });
     $$('[data-estornar-base]', el).forEach((b) => {
       b.onclick = async () => {
         if (!await confirmar('Estornar esta base? Os ingredientes voltam para o estoque e a base sai do estoque.', { ok: 'Estornar', perigo: true })) return;
         try { await rpc('rpc_estornar_base', { p_id: b.dataset.estornarBase }); await carregarEstoqueIns(); toast('Base estornada.', 'ok'); recarregar(); } catch (e) { falha(e); }
       };
+    });
+  }
+
+  // CORRIGIR PESO DE BASE: pesa o que tem; a diferença vira ajuste (não mexe em ingredientes)
+  async function formCorrigirBase(prepId) {
+    const x = prepPorId(prepId); if (!x) return;
+    let estB = {}; try { estB = await estoquePreparos(); } catch (e) { falha(e); }
+    const atual = estB[x.id]?.q || 0;
+    const d = abrirModal({ titulo: `${x.nome}`, classe: 'estreito',
+      corpo: `<p class="muted" style="margin-top:0">No sistema: <b>${qtdFmt(atual, 'g')}</b></p>
+        <div class="campo"><label>Quanto você tem agora (g)</label><input type="number" id="cb-peso" min="0" step="1" inputmode="numeric" placeholder="pese e digite · 0 se acabou"></div>
+        <div class="campo"><label>Observação</label><input type="text" id="cb-obs" placeholder="Opcional"></div>
+        <div id="cb-dif" class="small muted"></div>`,
+      rodape: `<button class="btn sec" id="cb-prod">Lançar nova produção</button><button class="btn" id="cb-ok">Salvar peso</button>` });
+    d.$('#cb-peso').oninput = () => {
+      const v = d.$('#cb-peso').value; if (v === '') { d.$('#cb-dif').textContent = ''; return; }
+      const dif = n(v) - atual;
+      d.$('#cb-dif').textContent = dif === 0 ? 'Igual ao sistema.' : (dif > 0 ? `Vai somar ${qtdFmt(dif, 'g')} ao estoque.` : `Vai tirar ${qtdFmt(-dif, 'g')} do estoque.`);
+    };
+    d.$('#cb-prod').onclick = () => { d.fechar(); formBase(x.id); };
+    d.$('#cb-ok').onclick = (e) => ocupado(e.currentTarget, async () => {
+      if (d.$('#cb-peso').value === '') throw new Error('Pese e digite quanto tem (0 se acabou).');
+      await rpc('rpc_corrigir_base', { p: { unidade_id: S.un, preparo_id: x.id, peso: n(d.$('#cb-peso').value), obs: d.$('#cb-obs').value.trim() } });
+      d.fechar(); toast(`${x.nome}: estoque corrigido para ${qtdFmt(n(d.$('#cb-peso').value), 'g')}.`, 'ok'); recarregar();
     });
   }
 
@@ -1307,12 +1331,13 @@
         return `<tr><td><b>${esc(x.nome)}</b> <span class="small muted">${esc(x.codigo)}</span></td><td class="num"><b>${qtdFmt(q, 'g')}</b></td>
           <td class="num">${q > 0 && porc ? '≈ ' + fmt(Math.floor(q / porc + 0.05)) : '—'}</td>
           <td>${q > 0 && valB[x.id] ? badgeValidade(valB[x.id]) : '<span class="muted">—</span>'}</td>
-          <td class="num">${custoUnFmt(c, 'g')}</td><td class="num">${brl(Math.max(q, 0) * c)}</td></tr>`;
+          <td class="num">${custoUnFmt(c, 'g')}</td><td class="num">${brl(Math.max(q, 0) * c)}</td>
+          <td><button class="btn sec mini" data-corrigir="${x.id}">Corrigir peso</button></td></tr>`;
       });
       corpo = `<div class="card"><div class="card-topo"><h2>Bases prontas</h2><button class="btn sec mini" id="b-prod-base">${ic('receita')} Produzir base</button></div>
-        ${tabela(['Base', '#Em estoque', '#Potes', 'Validade', '#Custo', '#Valor'], linhas,
-          { rodape: `<tr><td colspan="5">Valor em bases</td><td class="num">${brl(totV)}</td></tr>` })}
-        <p class="small muted" style="margin-bottom:0">Ao montar potes, o sistema usa primeiro o que está aqui. Sobra que for descartada: <b>Dar saída de perdas</b> → Base pronta.</p></div>`;
+        ${tabela(['Base', '#Em estoque', '#Potes', 'Validade', '#Custo', '#Valor', ''], linhas,
+          { rodape: `<tr><td colspan="5">Valor em bases</td><td class="num">${brl(totV)}</td><td></td></tr>` })}
+        <p class="small muted" style="margin-bottom:0">O sistema desconta das bases pela ficha de cada sabor. Se o que você tem não bater, pese e use <b>Corrigir peso</b>. Sobra que for descartada: <b>Dar saída de perdas</b> → Base pronta.</p></div>`;
     } else if (S.abaEst === 'insumos') {
       const busca = (S.buscaIns || '').toLowerCase(), cat = S.catIns || '';
       let totV = 0;
@@ -1353,6 +1378,7 @@
     $$('[data-aba]', el).forEach((b) => { b.onclick = () => { S.abaEst = b.dataset.aba; recarregar(); }; });
     $('#b-perda', el).onclick = () => formPerda();
     const bpb = $('#b-prod-base', el); if (bpb) bpb.onclick = () => formBase();
+    $$('[data-corrigir]', el).forEach((b) => { b.onclick = () => formCorrigirBase(b.dataset.corrigir); });
     const fb = $('#f-busca', el);
     if (fb) {
       let t; fb.oninput = () => { clearTimeout(t); t = setTimeout(() => { S.buscaIns = fb.value; recarregar().then(() => { const x = $('#f-busca'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } }); }, 300); };
